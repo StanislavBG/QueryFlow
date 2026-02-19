@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FileCode2, Loader2, Cpu, Database, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/hooks/use-toast";
+
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
 import {
   LLM_MODELS,
@@ -67,7 +67,6 @@ export default function Editor() {
   const { data: queries, isLoading: queriesLoading } = useSqlQueries();
   const { data: selectedQuery, isLoading: queryLoading } = useSqlQuery(selectedQueryId);
   const createMutation = useCreateSqlQuery();
-  const { toast } = useToast();
   const { dark, toggle: toggleTheme } = useTheme();
 
   const selectedModel = getModelById(selectedModelId) || LLM_MODELS[0];
@@ -79,39 +78,49 @@ export default function Editor() {
   );
   const dialectMeta = DIALECT_META[detectedDialect];
 
+  const [autoCreating, setAutoCreating] = useState(false);
+
   // Auto-select first query if none selected
-  if (!selectedQueryId && queries && queries.length > 0 && !queriesLoading) {
-    setSelectedQueryId(queries[0].id);
-  }
+  useEffect(() => {
+    if (!selectedQueryId && queries && queries.length > 0 && !queriesLoading) {
+      setSelectedQueryId(queries[0].id);
+    }
+  }, [selectedQueryId, queries, queriesLoading]);
+
+  // Auto-create a blank query when the list is empty so the editor is immediately ready for paste
+  useEffect(() => {
+    if (!queriesLoading && queries && queries.length === 0 && !autoCreating && !createMutation.isPending) {
+      setAutoCreating(true);
+      createMutation.mutate(
+        { title: "Untitled Query", content: "" },
+        {
+          onSuccess: (query) => {
+            setSelectedQueryId(query.id);
+            setAutoCreating(false);
+          },
+          onError: () => {
+            setAutoCreating(false);
+          },
+        }
+      );
+    }
+  }, [queriesLoading, queries, autoCreating, createMutation]);
 
   const handleContentChange = useCallback((content: string) => {
     setCurrentContent(content);
   }, []);
 
   // Sync content when the selected query data loads
-  if (selectedQuery && currentContent !== selectedQuery.content && !currentContent) {
-    setCurrentContent(selectedQuery.content);
-  }
+  useEffect(() => {
+    if (selectedQuery && !currentContent) {
+      setCurrentContent(selectedQuery.content);
+    }
+  }, [selectedQuery?.id]);
 
   const handleQuerySelect = useCallback((id: number) => {
     setSelectedQueryId(id);
     setCurrentContent("");
   }, []);
-
-  const handleCreateFirst = () => {
-    createMutation.mutate(
-      {
-        title: "Example Query",
-        content: "SELECT\n  u.id,\n  u.name,\n  u.email,\n  COUNT(o.id) AS order_count\nFROM users u\nLEFT JOIN orders o ON o.user_id = u.id\nWHERE u.active = true\nGROUP BY u.id, u.name, u.email\nORDER BY order_count DESC\nLIMIT 50;",
-      },
-      {
-        onSuccess: (query) => {
-          setSelectedQueryId(query.id);
-          toast({ title: "Query created", description: "Example query added. Click Analyze to get feedback." });
-        },
-      }
-    );
-  };
 
   const modelsByProvider = useMemo(() => {
     const grouped: Record<string, LLMModel[]> = {};
@@ -240,26 +249,7 @@ export default function Editor() {
           {/* Center - SQL Editor */}
           <ResizablePanel defaultSize={52} minSize={30}>
             <div className="h-full">
-              {queriesLoading ? (
-                <div className="flex items-center justify-center h-full">
-                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : !queries || queries.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full px-8">
-                  <FileCode2 className="w-10 h-10 text-muted-foreground mb-4" />
-                  <h2 className="text-base font-semibold mb-2">No queries yet</h2>
-                  <p className="text-sm text-muted-foreground text-center mb-6 max-w-sm">
-                    Create a query to get started. The analysis agents will provide constructive feedback to help improve your SQL.
-                  </p>
-                  <Button
-                    onClick={handleCreateFirst}
-                    disabled={createMutation.isPending}
-                  >
-                    {createMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                    Create Example Query
-                  </Button>
-                </div>
-              ) : queryLoading ? (
+              {(queriesLoading || queryLoading || autoCreating) ? (
                 <div className="flex items-center justify-center h-full">
                   <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
                 </div>
@@ -271,8 +261,8 @@ export default function Editor() {
                   modelName={selectedModel.name}
                 />
               ) : (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  <p className="text-sm">Select a query from the sidebar</p>
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
                 </div>
               )}
             </div>
