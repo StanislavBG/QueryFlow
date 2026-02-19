@@ -65,9 +65,10 @@ interface SqlEditorProps {
   onContentChange: (content: string) => void;
   maxChars: number;
   modelName: string;
+  dialect?: string;
 }
 
-export function SqlEditor({ query, onContentChange, maxChars, modelName }: SqlEditorProps) {
+export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect }: SqlEditorProps) {
   const [content, setContent] = useState(query.content);
   const [title, setTitle] = useState(query.title);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -173,12 +174,15 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName }: SqlEd
   };
 
   const handleFormat = () => {
-    formatMutation.mutate(content, {
+    formatMutation.mutate({ sql: content, dialect }, {
       onSuccess: (result) => {
         setContent(result.formatted);
         onContentChange(result.formatted);
         updateMutation.mutate({ id: query.id, data: { content: result.formatted, formattedContent: result.formatted } });
-        toast({ title: "Formatted", description: "Query formatted successfully." });
+        const desc = result.llm
+          ? "Query formatted using LLM (ISO/IEC 9075 standards)."
+          : "Query formatted using local formatter.";
+        toast({ title: "Formatted", description: result.notes || desc });
       },
       onError: (error) => {
         toast({ title: "Error", description: error.message, variant: "destructive" });

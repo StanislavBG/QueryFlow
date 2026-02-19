@@ -94,3 +94,22 @@ export const updateFormattingRuleSchema = z.object({
 export type FormattingRule = typeof formattingRules.$inferSelect;
 export type InsertFormattingRule = z.infer<typeof insertFormattingRuleSchema>;
 export type UpdateFormattingRule = z.infer<typeof updateFormattingRuleSchema>;
+
+// User Schemas table (DDL definitions for validation)
+export const userSchemas = pgTable("user_schemas", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  rawContent: text("raw_content").notNull(),
+  parsedDdl: text("parsed_ddl").notNull().default(""),
+  tables: jsonb("tables").$type<Array<{ name: string; columns: string[] }>>().default([]),
+  fileName: varchar("file_name", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertUserSchemaSchema = createInsertSchema(userSchemas).omit({ id: true, createdAt: true, updatedAt: true });
+export const updateUserSchemaSchema = insertUserSchemaSchema.partial();
+
+export type UserSchema = typeof userSchemas.$inferSelect;
+export type InsertUserSchema = z.infer<typeof insertUserSchemaSchema>;
+export type UpdateUserSchema = z.infer<typeof updateUserSchemaSchema>;
