@@ -143,9 +143,9 @@ function analyzeOptimization(sql: string): AgentResult[] {
     results.push({
       agentType: "optimization",
       severity: "warning",
-      title: "Avoid SELECT *",
-      message: "Using SELECT * retrieves all columns from the table, which can transfer unnecessary data and prevent the query optimizer from using covering indexes.",
-      suggestion: "Explicitly list only the columns you need, e.g., SELECT col1, col2, col3 FROM table.",
+      title: "SELECT * usage detected",
+      message: "SELECT * retrieves all columns from the table, which can transfer more data than needed and may prevent the query optimizer from using covering indexes.",
+      suggestion: "Consider listing only the columns you need, e.g., SELECT col1, col2, col3 FROM table.",
       lineNumber: findLineNumber(sql, /\bSELECT\s+\*/i),
     });
   }
@@ -157,9 +157,9 @@ function analyzeOptimization(sql: string): AgentResult[] {
       results.push({
         agentType: "optimization",
         severity: "warning",
-        title: "No WHERE clause",
-        message: "This query selects from a table without a WHERE clause or LIMIT, which may scan the entire table.",
-        suggestion: "Add a WHERE clause to filter results, or add LIMIT to restrict the number of rows returned.",
+        title: "Query without WHERE clause",
+        message: "This query selects from a table without a WHERE clause or LIMIT, which may result in a full table scan on large datasets.",
+        suggestion: "Consider adding a WHERE clause to filter results, or a LIMIT to restrict the number of rows returned.",
       });
     }
   }
@@ -377,8 +377,8 @@ function analyzeStyle(sql: string): AgentResult[] {
       agentType: "style",
       severity: "info",
       title: "Lowercase SQL keywords",
-      message: "SQL keywords are written in lowercase. While valid, UPPERCASE keywords are the industry convention and improve readability.",
-      suggestion: "Consider using UPPERCASE for SQL keywords (e.g., select -> SELECT, from -> FROM).",
+      message: "SQL keywords are written in lowercase. While perfectly valid, UPPERCASE keywords are a common convention that can help distinguish keywords from identifiers.",
+      suggestion: "Some teams prefer UPPERCASE for SQL keywords (e.g., select -> SELECT, from -> FROM). Choose whatever convention works best for your team.",
     });
   }
 
@@ -449,20 +449,20 @@ const AGENT_MAP: Record<AgentType, (sql: string) => AgentResult[]> = {
 
 export const AGENT_DESCRIPTIONS: Record<AgentType, { name: string; description: string }> = {
   structure: {
-    name: "Structure Agent",
-    description: "Analyzes query structure, nesting depth, complexity, and readability.",
+    name: "Structure",
+    description: "Reviews query structure, nesting depth, complexity, and readability.",
   },
   optimization: {
-    name: "Optimization Agent",
-    description: "Identifies performance issues and suggests query optimization techniques.",
+    name: "Performance",
+    description: "Reviews query patterns and highlights performance considerations.",
   },
   error: {
-    name: "Error Detection Agent",
-    description: "Detects potential SQL errors, typos, and common mistakes.",
+    name: "Correctness",
+    description: "Checks for potential SQL issues, typos, and syntax patterns.",
   },
   style: {
-    name: "Style Agent",
-    description: "Checks formatting consistency, keyword casing, and coding conventions.",
+    name: "Style",
+    description: "Reviews formatting consistency, keyword casing, and coding conventions.",
   },
 };
 
