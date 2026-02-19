@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import type { Server } from "http";
+import { clerkMiddleware } from "@clerk/express";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
@@ -8,6 +9,11 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  app.use(clerkMiddleware({
+    publishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+    secretKey: process.env.CLERK_SECRET_KEY,
+  }));
+
   app.get(api.documents.list.path, async (req, res) => {
     const docs = await storage.getDocuments();
     res.json(docs);
