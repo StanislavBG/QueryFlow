@@ -25,27 +25,27 @@ import { useToast } from "@/hooks/use-toast";
 const agentMeta: Record<string, { icon: typeof Search; label: string; description: string; color: string }> = {
   structure: {
     icon: Search,
-    label: "Structure Agent",
+    label: "Structure",
     description: "Analyzes query structure, nesting depth, and readability",
-    color: "text-cyan-400",
+    color: "text-muted-foreground",
   },
   optimization: {
     icon: Zap,
-    label: "Optimization Agent",
-    description: "Identifies performance issues and suggests improvements",
-    color: "text-amber-400",
+    label: "Performance",
+    description: "Reviews query patterns and suggests performance considerations",
+    color: "text-muted-foreground",
   },
   error: {
     icon: Bug,
-    label: "Error Detection Agent",
-    description: "Detects potential SQL errors, typos, and common mistakes",
-    color: "text-red-400",
+    label: "Correctness",
+    description: "Checks for potential SQL issues, typos, and syntax patterns",
+    color: "text-muted-foreground",
   },
   style: {
     icon: Palette,
-    label: "Style Agent",
-    description: "Checks formatting consistency and coding conventions",
-    color: "text-purple-400",
+    label: "Style",
+    description: "Reviews formatting consistency and coding conventions",
+    color: "text-muted-foreground",
   },
 };
 
@@ -112,18 +112,18 @@ export function SettingsDialog() {
         <Button
           size="sm"
           variant="ghost"
-          className="h-7 w-7 p-0 hover:bg-white/10"
+          className="h-7 w-7 p-0"
         >
           <Settings className="w-4 h-4" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[550px] glass-card border-white/10">
+      <DialogContent className="sm:max-w-[550px]">
         <DialogHeader>
           <DialogTitle className="text-xl font-bold">Settings</DialogTitle>
         </DialogHeader>
 
         <Tabs defaultValue="agents" className="mt-2">
-          <TabsList className="w-full bg-secondary/50">
+          <TabsList className="w-full">
             <TabsTrigger value="agents" className="flex-1">Agents</TabsTrigger>
             <TabsTrigger value="formatting" className="flex-1">Formatting</TabsTrigger>
           </TabsList>
@@ -142,7 +142,7 @@ export function SettingsDialog() {
                 return (
                   <div
                     key={setting.agentType}
-                    className="p-3 rounded-lg border border-white/10 bg-secondary/30 space-y-3"
+                    className="p-3 rounded-lg border border-border bg-muted/50 space-y-3"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
@@ -164,7 +164,7 @@ export function SettingsDialog() {
                           value={String(setting.priority)}
                           onValueChange={(val) => handlePriorityChange(setting.agentType, val)}
                         >
-                          <SelectTrigger className="h-7 w-28 text-xs bg-background/50 border-white/10">
+                          <SelectTrigger className="h-7 w-28 text-xs bg-background border-border">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -173,7 +173,7 @@ export function SettingsDialog() {
                             <SelectItem value="3">High</SelectItem>
                           </SelectContent>
                         </Select>
-                        <Badge variant="outline" className="text-[10px] h-4 border-white/10">
+                        <Badge variant="outline" className="text-[10px] h-4">
                           {priorityLabels[setting.priority] || "Low"}
                         </Badge>
                       </div>
@@ -197,7 +197,7 @@ export function SettingsDialog() {
                 return (
                   <div
                     key={rule.name}
-                    className="p-3 rounded-lg border border-white/10 bg-secondary/30"
+                    className="p-3 rounded-lg border border-border bg-muted/50"
                   >
                     <div className="flex items-center justify-between">
                       <div>
@@ -218,7 +218,7 @@ export function SettingsDialog() {
                             value={rule.value}
                             onValueChange={(val) => handleRuleValueChange(rule.name, val)}
                           >
-                            <SelectTrigger className="h-7 w-32 text-xs bg-background/50 border-white/10">
+                            <SelectTrigger className="h-7 w-32 text-xs bg-background border-border">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -231,7 +231,7 @@ export function SettingsDialog() {
                             value={rule.value}
                             onValueChange={(val) => handleRuleValueChange(rule.name, val)}
                           >
-                            <SelectTrigger className="h-7 w-32 text-xs bg-background/50 border-white/10">
+                            <SelectTrigger className="h-7 w-32 text-xs bg-background border-border">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -247,7 +247,7 @@ export function SettingsDialog() {
                             type="number"
                             value={rule.value}
                             onChange={(e) => handleRuleValueChange(rule.name, e.target.value)}
-                            className="h-7 w-24 text-xs bg-background/50 border-white/10"
+                            className="h-7 w-24 text-xs bg-background border-border"
                           />
                         )}
                       </div>
