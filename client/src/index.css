@@ -58,8 +58,46 @@
   .glass-card {
     @apply bg-card/50 backdrop-blur-xl border border-white/10 shadow-2xl;
   }
-  
+
   .text-gradient {
     @apply bg-clip-text text-transparent bg-gradient-to-r from-primary via-purple-400 to-pink-500;
   }
+}
+
+/* SQL Syntax Highlighting */
+.sql-keyword {
+  color: hsl(263 70% 65%);
+  font-weight: 600;
+}
+
+.sql-string {
+  color: hsl(142 70% 55%);
+}
+
+.sql-comment {
+  color: hsl(240 5% 50%);
+  font-style: italic;
+}
+
+.sql-number {
+  color: hsl(30 90% 60%);
+}
+
+/* Custom scrollbar for scroll areas */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(240 3.7% 25%);
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(240 3.7% 35%);
 }
