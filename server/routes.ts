@@ -246,6 +246,16 @@ export async function registerRoutes(
     }
   }).catch(console.error);
 
+  // Seed a default blank query so the editor is immediately ready for paste
+  storage.getSqlQueries().then(async (queries) => {
+    if (queries.length === 0) {
+      await storage.createSqlQuery({
+        title: "Untitled Query",
+        content: "",
+      });
+    }
+  }).catch(console.error);
+
   // Seed agent settings
   storage.getAgentSettings().then(async (settings) => {
     if (settings.length === 0) {
