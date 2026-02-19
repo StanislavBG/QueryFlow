@@ -1,52 +1,92 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ── Light mode (default variables, overridden by .dark) ──────────── */
 :root {
-  --font-sans: 'Plus Jakarta Sans', sans-serif;
+  --font-sans: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 
-  --background: 240 10% 3.9%;
-  --foreground: 0 0% 98%;
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;
 
-  --card: 240 10% 3.9%;
-  --card-foreground: 0 0% 98%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
 
-  --popover: 240 10% 3.9%;
-  --popover-foreground: 0 0% 98%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
 
-  --primary: 263 70% 50%;
-  --primary-foreground: 210 40% 98%;
+  --primary: 222 47% 31%;
+  --primary-foreground: 0 0% 100%;
 
-  --secondary: 240 3.7% 15.9%;
-  --secondary-foreground: 0 0% 98%;
+  --secondary: 220 14% 96%;
+  --secondary-foreground: 222 47% 11%;
 
-  --muted: 240 3.7% 15.9%;
-  --muted-foreground: 240 5% 64.9%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 9% 46%;
 
-  --accent: 240 3.7% 15.9%;
-  --accent-foreground: 0 0% 98%;
+  --accent: 220 14% 96%;
+  --accent-foreground: 222 47% 11%;
 
-  --destructive: 0 62.8% 30.6%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 222 47% 31%;
+
+  --radius: 0.5rem;
+}
+
+/* ── Dark mode ─────────────────────────────────────────────────────── */
+.dark {
+  --background: 222 47% 6%;
+  --foreground: 210 20% 95%;
+
+  --card: 222 47% 8%;
+  --card-foreground: 210 20% 95%;
+
+  --popover: 222 47% 8%;
+  --popover-foreground: 210 20% 95%;
+
+  --primary: 210 60% 50%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 222 30% 14%;
+  --secondary-foreground: 210 20% 95%;
+
+  --muted: 222 30% 14%;
+  --muted-foreground: 218 11% 55%;
+
+  --accent: 222 30% 14%;
+  --accent-foreground: 210 20% 95%;
+
+  --destructive: 0 62% 40%;
   --destructive-foreground: 0 0% 98%;
 
-  --border: 240 3.7% 15.9%;
-  --input: 240 3.7% 15.9%;
-  --ring: 240 4.9% 83.9%;
-
-  --radius: 0.75rem;
+  --border: 222 30% 16%;
+  --input: 222 30% 16%;
+  --ring: 210 60% 50%;
 }
 
 @layer base {
+  html {
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
   body {
-    @apply bg-background text-foreground antialiased selection:bg-primary/30 selection:text-primary-foreground;
+    @apply bg-background text-foreground antialiased;
     font-family: var(--font-sans);
   }
 
   h1, h2, h3, h4, h5, h6 {
-    @apply font-bold tracking-tight;
+    @apply font-semibold tracking-tight;
   }
 
   code, pre {
@@ -56,48 +96,54 @@
 
 @layer utilities {
   .glass-card {
-    @apply bg-card/50 backdrop-blur-xl border border-white/10 shadow-2xl;
-  }
-
-  .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary via-purple-400 to-pink-500;
+    @apply bg-card border border-border shadow-sm;
   }
 }
 
-/* SQL Syntax Highlighting */
-.sql-keyword {
-  color: hsl(263 70% 65%);
+/* SQL Syntax Highlighting — Dark */
+.dark .sql-keyword {
+  color: hsl(210 80% 65%);
   font-weight: 600;
 }
-
-.sql-string {
-  color: hsl(142 70% 55%);
+.dark .sql-string {
+  color: hsl(142 60% 55%);
 }
-
-.sql-comment {
-  color: hsl(240 5% 50%);
+.dark .sql-comment {
+  color: hsl(220 10% 48%);
   font-style: italic;
 }
-
-.sql-number {
-  color: hsl(30 90% 60%);
+.dark .sql-number {
+  color: hsl(30 80% 60%);
 }
 
-/* Custom scrollbar for scroll areas */
+/* SQL Syntax Highlighting — Light */
+.sql-keyword {
+  color: hsl(222 80% 40%);
+  font-weight: 600;
+}
+.sql-string {
+  color: hsl(142 60% 32%);
+}
+.sql-comment {
+  color: hsl(220 10% 55%);
+  font-style: italic;
+}
+.sql-number {
+  color: hsl(25 80% 42%);
+}
+
+/* Custom scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
-
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
-
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: hsl(240 3.7% 25%);
+  background: hsl(var(--border));
   border-radius: 3px;
 }
-
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: hsl(240 3.7% 35%);
+  background: hsl(var(--muted-foreground));
 }

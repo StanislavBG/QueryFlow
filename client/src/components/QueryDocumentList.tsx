@@ -49,12 +49,13 @@ export function QueryDocumentList({ selectedId, onSelect }: QueryDocumentListPro
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-3 border-b border-white/10">
+      <div className="p-3 border-b border-border">
         <Button
           onClick={handleCreate}
           disabled={createMutation.isPending}
           size="sm"
-          className="w-full bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30"
+          variant="outline"
+          className="w-full"
         >
           {createMutation.isPending ? (
             <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -81,10 +82,10 @@ export function QueryDocumentList({ selectedId, onSelect }: QueryDocumentListPro
               <button
                 key={query.id}
                 onClick={() => onSelect(query.id)}
-                className={`w-full text-left px-3 py-2.5 rounded-lg transition-all text-sm group ${
+                className={`w-full text-left px-3 py-2.5 rounded-md text-sm group ${
                   selectedId === query.id
-                    ? "bg-primary/15 border border-primary/30 text-foreground"
-                    : "hover:bg-white/5 border border-transparent text-muted-foreground hover:text-foreground"
+                    ? "bg-accent border border-border text-foreground"
+                    : "hover:bg-accent/50 border border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
                 <div className="flex items-center justify-between">
