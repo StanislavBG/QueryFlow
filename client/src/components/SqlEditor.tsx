@@ -3,7 +3,7 @@ import { useUpdateSqlQuery, useFormatQuery } from "@/hooks/use-sql-queries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Wand2, Save, Loader2, Pencil, Check, AlertTriangle } from "lucide-react";
+import { Wand2, Save, Loader2, Pencil, Check, AlertTriangle, Minus, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { SqlQuery } from "@shared/schema";
 
@@ -70,6 +70,21 @@ interface SqlEditorProps {
   onLineHover?: (lineNumber: number | null) => void;
 }
 
+const FONT_SIZE_STEPS = [12, 13, 14, 15, 16, 18, 20];
+const DEFAULT_FONT_SIZE = 14;
+const FONT_SIZE_STORAGE_KEY = "queryflow-editor-font-size";
+
+function getStoredFontSize(): number {
+  try {
+    const stored = localStorage.getItem(FONT_SIZE_STORAGE_KEY);
+    if (stored) {
+      const val = parseInt(stored, 10);
+      if (FONT_SIZE_STEPS.includes(val)) return val;
+    }
+  } catch {}
+  return DEFAULT_FONT_SIZE;
+}
+
 export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect, highlightedLines, onLineHover }: SqlEditorProps) {
   // The editor always works with the latest version: draft if available, otherwise saved content
   const [content, setContent] = useState(query.draftContent ?? query.content);
@@ -77,6 +92,7 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hoveredLineNum, setHoveredLineNum] = useState<number | null>(null);
+  const [fontSize, setFontSize] = useState(getStoredFontSize);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   const updateMutation = useUpdateSqlQuery();
@@ -204,6 +220,19 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
     updateMutation.mutate({ id: query.id, data: { title } });
   };
 
+  const lineHeight = Math.round(fontSize * 1.857);
+
+  const changeFontSize = useCallback((direction: 1 | -1) => {
+    setFontSize((prev) => {
+      const idx = FONT_SIZE_STEPS.indexOf(prev);
+      const nextIdx = idx + direction;
+      if (nextIdx < 0 || nextIdx >= FONT_SIZE_STEPS.length) return prev;
+      const next = FONT_SIZE_STEPS[nextIdx];
+      try { localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(next)); } catch {}
+      return next;
+    });
+  }, []);
+
   const lineCount = content.split("\n").length;
 
   // Handle line hover for feedback linking
@@ -254,7 +283,32 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => changeFontSize(-1)}
+                disabled={fontSize <= FONT_SIZE_STEPS[0]}
+                className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              >
+                <Minus className="w-3.5 h-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom"><p className="text-xs">Decrease font size</p></TooltipContent>
+          </Tooltip>
+          <span className="text-[10px] font-mono text-muted-foreground w-6 text-center">{fontSize}</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => changeFontSize(1)}
+                disabled={fontSize >= FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1]}
+                className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom"><p className="text-xs">Increase font size</p></TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
@@ -264,7 +318,7 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
         <div className="absolute inset-0 flex">
           {/* Line numbers */}
           <div className="flex-shrink-0 bg-card border-r border-border select-none overflow-hidden">
-            <div className="px-3 py-3 font-mono text-xs leading-[1.625rem]">
+            <div className="px-3 py-3 font-mono" style={{ fontSize: `${fontSize - 2}px`, lineHeight: `${lineHeight}px` }}>
               {Array.from({ length: Math.max(lineCount, 20) }, (_, i) => {
                 const lineNum = i + 1;
                 const isHighlighted = activeHighlightedLines.has(lineNum);
@@ -363,14 +417,15 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
 
             {/* Line highlight layer (behind syntax, behind textarea) */}
             <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 0 }}>
-              <div className="py-3 font-mono text-sm leading-[1.625rem]">
+              <div className="py-3 font-mono" style={{ fontSize: `${fontSize}px`, lineHeight: `${lineHeight}px` }}>
                 {content.split("\n").map((_, i) => {
                   const lineNum = i + 1;
                   const isHighlighted = activeHighlightedLines.has(lineNum);
                   return (
                     <div
                       key={i}
-                      className={`h-[1.625rem] ${isHighlighted ? "bg-primary/10 border-l-2 border-primary" : ""}`}
+                      style={{ height: `${lineHeight}px` }}
+                      className={isHighlighted ? "bg-primary/10 border-l-2 border-primary" : ""}
                     />
                   );
                 })}
@@ -380,8 +435,8 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
             {/* Syntax highlight layer */}
             <div
               ref={highlightRef}
-              className="absolute inset-0 px-4 py-3 font-mono text-sm leading-[1.625rem] whitespace-pre-wrap break-words overflow-hidden pointer-events-none"
-              style={{ zIndex: 1 }}
+              className="absolute inset-0 px-4 py-3 font-mono whitespace-pre-wrap break-words overflow-hidden pointer-events-none"
+              style={{ fontSize: `${fontSize}px`, lineHeight: `${lineHeight}px`, zIndex: 1 }}
               dangerouslySetInnerHTML={{ __html: highlightSQL(content) || '<span class="text-muted-foreground/30">Write your SQL query here...</span>' }}
             />
             {/* Textarea layer */}
@@ -392,8 +447,8 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
               onScroll={handleScroll}
               onKeyDown={handleKeyDown}
               maxLength={maxChars}
-              className="absolute inset-0 w-full h-full px-4 py-3 font-mono text-sm leading-[1.625rem] bg-transparent text-transparent caret-foreground resize-none outline-none selection:bg-primary/30 selection:text-transparent"
-              style={{ zIndex: 2 }}
+              className="absolute inset-0 w-full h-full px-4 py-3 font-mono bg-transparent text-transparent caret-foreground resize-none outline-none selection:bg-primary/30 selection:text-transparent"
+              style={{ fontSize: `${fontSize}px`, lineHeight: `${lineHeight}px`, zIndex: 2 }}
               spellCheck={false}
               placeholder="Write your SQL query here..."
             />
