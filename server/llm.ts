@@ -206,6 +206,137 @@ ${sql}
 }
 
 /**
+ * QA validation step: evaluates each recommendation's before/after SQL pair.
+ * Removes recommendations that would cause:
+ *  - Semantic differences (different result sets, row counts, NULL handling)
+ *  - Logical differences (different filtering, join behavior, ordering)
+ *  - Performance degradation (less efficient execution plans)
+ *
+ * Recommendations that identify genuine bugs are kept but flagged with
+ * severity "error" so the user can decide.
+ */
+export async function llmValidateRecommendations(
+  originalSql: string,
+  recommendations: Array<{
+    agentType: string;
+    severity: string;
+    title: string;
+    message: string;
+    suggestion: string | null;
+    lineNumber: number | null;
+  }>,
+  dialect: string = "Standard SQL"
+): Promise<Array<{
+  agentType: string;
+  severity: string;
+  title: string;
+  message: string;
+  suggestion: string | null;
+  lineNumber: number | null;
+}>> {
+  // Only validate recommendations that have concrete SQL suggestions
+  const withSuggestions = recommendations.filter((r) => r.suggestion && r.suggestion.trim().length > 0);
+  const withoutSuggestions = recommendations.filter((r) => !r.suggestion || r.suggestion.trim().length === 0);
+
+  if (withSuggestions.length === 0) {
+    return recommendations;
+  }
+
+  const anthropic = getClient();
+
+  // Build the evaluation prompt with all before/after pairs
+  const pairs = withSuggestions.map((r, i) => (
+    `### Recommendation ${i + 1}: "${r.title}" [${r.agentType}/${r.severity}]
+Message: ${r.message}
+Suggestion: ${r.suggestion}`
+  )).join("\n\n");
+
+  const response = await anthropic.messages.create({
+    model: "claude-opus-4-6-20250918",
+    max_tokens: 4096,
+    messages: [
+      {
+        role: "user",
+        content: `You are a rigorous SQL QA reviewer. Your job is to protect the user from recommendations that would silently change query behavior.
+
+Given the original SQL and a set of recommendations with suggestions, evaluate EACH recommendation for:
+
+1. **Semantic equivalence**: Would applying the suggestion change the result set? (row count, column values, NULL handling, DISTINCT behavior, aggregate results)
+2. **Logical equivalence**: Would it change the filtering, join conditions, grouping, or ordering?
+3. **Performance safety**: Could it cause performance degradation? (removing indexes hints, adding unnecessary subqueries, changing join order in problematic ways)
+
+Dialect: ${dialect}
+
+Original SQL:
+\`\`\`sql
+${originalSql}
+\`\`\`
+
+${pairs}
+
+For EACH recommendation (by number), return a JSON array of verdict objects:
+- "index": the recommendation number (1-indexed)
+- "verdict": "safe" | "bug_fix" | "reject"
+  - "safe": The suggestion preserves semantics, logic, and performance. Keep it.
+  - "bug_fix": The suggestion intentionally changes semantics/logic because it fixes a genuine bug. Keep it but it should be flagged for user review.
+  - "reject": The suggestion would silently change semantics, logic, or degrade performance without fixing a bug. Remove it.
+- "reason": brief explanation of why (1-2 sentences)
+
+Return ONLY the JSON array.`,
+      },
+    ],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text : "";
+
+  let verdicts: Array<{ index: number; verdict: string; reason: string }> = [];
+  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  if (jsonMatch) {
+    try {
+      verdicts = JSON.parse(jsonMatch[0]);
+    } catch {
+      // If parsing fails, keep all recommendations (fail open)
+      return recommendations;
+    }
+  }
+
+  if (verdicts.length === 0) {
+    return recommendations;
+  }
+
+  // Build a map of verdicts by index
+  const verdictMap = new Map<number, { verdict: string; reason: string }>();
+  for (const v of verdicts) {
+    verdictMap.set(v.index, v);
+  }
+
+  // Filter and transform recommendations
+  const validated: typeof recommendations = [];
+
+  for (let i = 0; i < withSuggestions.length; i++) {
+    const rec = withSuggestions[i];
+    const v = verdictMap.get(i + 1);
+
+    if (!v || v.verdict === "safe") {
+      // Keep as-is
+      validated.push(rec);
+    } else if (v.verdict === "bug_fix") {
+      // Keep but mark as a suspected bug for user review
+      validated.push({
+        ...rec,
+        severity: "error",
+        title: `[Bug?] ${rec.title}`,
+        message: `${rec.message}\n\n⚠️ QA Review: This suggestion intentionally changes query behavior because a potential bug was identified. ${v.reason}`,
+      });
+    }
+    // verdict === "reject" → omitted from results
+  }
+
+  // Combine: validated suggestions + items without suggestions (info/success items)
+  return [...validated, ...withoutSuggestions];
+}
+
+/**
  * Answer a user question about their SQL query, schemas, or general SQL topics.
  */
 export async function llmAskQuestion(
