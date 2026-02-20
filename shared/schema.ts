@@ -85,6 +85,7 @@ export const userSchemas = pgTable("user_schemas", {
   parsedDdl: text("parsed_ddl").notNull().default(""),
   tables: jsonb("tables").$type<Array<{ name: string; columns: string[] }>>().default([]),
   fileName: varchar("file_name", { length: 255 }),
+  description: text("description").default(""),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
