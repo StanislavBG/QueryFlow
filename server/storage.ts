@@ -78,6 +78,7 @@ function decryptSqlQuery(row: SqlQuery): SqlQuery {
     ...row,
     title: decrypt(row.title, aad) ?? "Untitled Query",
     content: decrypt(row.content, aad) ?? "",
+    draftContent: decrypt(row.draftContent, aad),
     formattedContent: decrypt(row.formattedContent, aad),
   };
 }
@@ -148,6 +149,7 @@ export class DatabaseStorage implements IStorage {
       ...query,
       title: encrypt(query.title ?? "Untitled Query", aad) ?? "",
       content: encrypt(query.content ?? "", aad) ?? "",
+      draftContent: encrypt(query.draftContent, aad) ?? undefined,
       formattedContent: encrypt(query.formattedContent, aad) ?? undefined,
     };
     const [created] = await db.insert(sqlQueries).values(encrypted).returning();
@@ -161,6 +163,7 @@ export class DatabaseStorage implements IStorage {
     const encrypted: Record<string, unknown> = { updatedAt: new Date() };
     if (query.title !== undefined) encrypted.title = encrypt(query.title, aad);
     if (query.content !== undefined) encrypted.content = encrypt(query.content, aad);
+    if (query.draftContent !== undefined) encrypted.draftContent = query.draftContent === null ? null : encrypt(query.draftContent, aad);
     if (query.formattedContent !== undefined) encrypted.formattedContent = encrypt(query.formattedContent, aad);
     if (query.userId !== undefined) encrypted.userId = query.userId;
 

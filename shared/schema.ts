@@ -24,6 +24,7 @@ export const sqlQueries = pgTable("sql_queries", {
   userId: varchar("user_id", { length: 255 }),
   title: varchar("title", { length: 255 }).notNull().default("Untitled Query"),
   content: text("content").notNull().default(""),
+  draftContent: text("draft_content"),
   formattedContent: text("formatted_content"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
