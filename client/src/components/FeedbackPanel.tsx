@@ -17,6 +17,7 @@ import {
   Bug,
   Palette,
   PlayCircle,
+  BookOpen,
 } from "lucide-react";
 import { useState } from "react";
 import type { QueryFeedbackRow } from "@shared/schema";
@@ -57,6 +58,7 @@ const agentConfig = {
   optimization: { icon: Zap, label: "Performance", color: "text-muted-foreground" },
   error: { icon: Bug, label: "Correctness", color: "text-muted-foreground" },
   style: { icon: Palette, label: "Style", color: "text-muted-foreground" },
+  documentation: { icon: BookOpen, label: "Documentation", color: "text-primary" },
 };
 
 function FeedbackCard({
@@ -147,16 +149,17 @@ function FeedbackCard({
 
 interface FeedbackPanelProps {
   queryId: number | null;
+  dialect?: string;
 }
 
-export function FeedbackPanel({ queryId }: FeedbackPanelProps) {
+export function FeedbackPanel({ queryId, dialect }: FeedbackPanelProps) {
   const { data: feedback, isLoading: isFeedbackLoading } = useQueryFeedback(queryId);
   const analyzeMutation = useAnalyzeQuery();
   const [filter, setFilter] = useState<string | null>(null);
 
   const handleAnalyze = () => {
     if (queryId) {
-      analyzeMutation.mutate(queryId);
+      analyzeMutation.mutate({ queryId, dialect });
     }
   };
 
