@@ -426,6 +426,7 @@ export async function registerRoutes(
 
       let parsedDdl = input.rawContent;
       let tables: Array<{ name: string; columns: string[] }> = [];
+      let parseError: string | undefined;
 
       // Always use LLM for schema parsing (per CLAUDE.md: all parsers must be LLM-based)
       if (isLLMConfigured()) {
@@ -433,9 +434,14 @@ export async function registerRoutes(
           const result = await llmParseSchema(input.rawContent, input.fileName || "schema.sql");
           parsedDdl = result.parsed;
           tables = result.tables;
+          if (result.error) parseError = result.error;
         } catch (err) {
-          console.error("LLM schema parsing failed:", err);
+          parseError = `LLM schema parsing failed: ${err instanceof Error ? err.message : String(err)}`;
+          console.error("[schema-route]", parseError, err);
         }
+      } else {
+        parseError = "LLM not configured. Set ANTHROPIC_API_KEY to enable schema parsing.";
+        console.warn("[schema-route]", parseError);
       }
 
       const schema = await storage.createUserSchema({
@@ -449,7 +455,7 @@ export async function registerRoutes(
       });
 
       logActivity(userId, "schema.upload", "schema", schema.id);
-      res.status(201).json(schema);
+      res.status(201).json({ ...schema, parseError });
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
