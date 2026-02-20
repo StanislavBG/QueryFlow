@@ -2,6 +2,34 @@ import { pgTable, text, serial, varchar, timestamp, integer, boolean, jsonb } fr
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// ─── App Users (RBAC) ─────────────────────────────────────────────────────
+export const appUsers = pgTable("app_users", {
+  id: serial("id").primaryKey(),
+  clerkId: varchar("clerk_id", { length: 255 }).notNull().unique(),
+  email: varchar("email", { length: 255 }).notNull(),
+  role: varchar("role", { length: 20 }).notNull().default("user"), // 'admin' | 'user'
+  displayName: varchar("display_name", { length: 255 }),
+  firstSeen: timestamp("first_seen").defaultNow(),
+  lastActive: timestamp("last_active").defaultNow(),
+});
+
+export type AppUser = typeof appUsers.$inferSelect;
+export type InsertAppUser = typeof appUsers.$inferInsert;
+
+// ─── Activity Events (Behavior Tracking) ──────────────────────────────────
+export const activityEvents = pgTable("activity_events", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id", { length: 255 }),
+  action: varchar("action", { length: 100 }).notNull(), // e.g. 'query.create', 'query.analyze', 'schema.upload', 'chat.ask', 'format.run'
+  resource: varchar("resource", { length: 50 }), // e.g. 'query', 'schema', 'chat', 'format'
+  resourceId: integer("resource_id"),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type ActivityEvent = typeof activityEvents.$inferSelect;
+export type InsertActivityEvent = typeof activityEvents.$inferInsert;
+
 export const documents = pgTable("documents", {
   id: serial("id").primaryKey(),
   content: text("content").notNull(),
