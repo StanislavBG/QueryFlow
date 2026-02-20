@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
 import { formatSQL } from "./formatter";
-import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmAskQuestion, llmParseSchema } from "./llm";
+import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema } from "./llm";
 
 // All available analysis categories
 const ALL_CATEGORIES = ["structure", "optimization", "error", "style", "formatting", "documentation"] as const;
@@ -215,25 +215,41 @@ export async function registerRoutes(
       ? docs.map(d => d.content).join("\n\n---\n\n")
       : undefined;
 
-    // Gather previously accepted feedback as preference signal
+    // Gather previously resolved feedback as preference signal.
+    // Resolved items represent patterns the user has already reviewed —
+    // the LLM should not flag the same patterns again.
     const existingFeedback = await storage.getFeedbackByQueryId(queryId);
-    const acceptedFeedback = existingFeedback
+    const resolvedFeedback = existingFeedback
       .filter(f => f.isResolved)
       .map(f => ({ title: f.title, suggestion: f.suggestion }));
 
-    // Clear previous feedback
-    await storage.deleteFeedbackByQueryId(queryId);
+    // Clear only unresolved feedback; keep resolved items as a persistent
+    // dismissal record so context survives across multiple analyses.
+    const unresolvedIds = existingFeedback.filter(f => !f.isResolved).map(f => f.id);
+    for (const uid of unresolvedIds) {
+      await storage.deleteFeedbackById(uid);
+    }
 
     try {
+      // Step 1: Generate recommendations
       const llmResults = await llmAnalyzeQuery(query.content, {
         dialect,
         schemas: schemaContext,
         documents: docContext,
-        acceptedFeedback: acceptedFeedback.length > 0 ? acceptedFeedback : undefined,
+        acceptedFeedback: resolvedFeedback.length > 0 ? resolvedFeedback : undefined,
         enabledCategories,
       });
 
-      const feedbackItems = llmResults.map(r => ({
+      // Step 2: QA validation – remove suggestions that would silently
+      // change semantics, logic, or degrade performance. Bug-fix
+      // suggestions are kept but flagged for user review.
+      const validated = await llmValidateRecommendations(
+        query.content,
+        llmResults,
+        dialect
+      );
+
+      const feedbackItems = validated.map(r => ({
         queryId,
         agentType: r.agentType,
         severity: r.severity,

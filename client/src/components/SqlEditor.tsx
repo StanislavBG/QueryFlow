@@ -240,80 +240,11 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
               <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
             </button>
           )}
-          <span className="text-[10px] text-muted-foreground ml-2">
-            {lineCount} lines
-          </span>
         </div>
         <div className="flex items-center gap-2">
-          {/* Character count / limit indicator */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border ${
-                isOverLimit
-                  ? "border-red-500/30 bg-red-500/10 text-red-400"
-                  : isNearLimit
-                    ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
-                    : "border-border text-muted-foreground"
-              }`}>
-                {isOverLimit && <AlertTriangle className="w-3 h-3" />}
-                <span>{formatCharCount(charCount)}</span>
-                <span className="text-muted-foreground/50">/</span>
-                <span>{formatCharCount(maxChars)}</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p className="text-xs">
-                {charCount.toLocaleString()} / {maxChars.toLocaleString()} chars
-                {isOverLimit
-                  ? ` — over limit for ${modelName}`
-                  : ` — max for ${modelName}`}
-              </p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleFormat}
-            disabled={formatMutation.isPending || !content.trim()}
-            className="h-7 text-xs"
-          >
-            {formatMutation.isPending ? (
-              <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
-            ) : (
-              <Wand2 className="w-3 h-3 mr-1.5" />
-            )}
-            Format
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={isSaving}
-            className="h-7 text-xs"
-          >
-            {isSaving ? (
-              <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
-            ) : (
-              <Save className="w-3 h-3 mr-1.5" />
-            )}
-            Save
-          </Button>
         </div>
       </div>
 
-      {/* Character limit progress bar */}
-      <div className="h-0.5 bg-muted">
-        <div
-          className={`h-full transition-all duration-300 ${
-            isOverLimit
-              ? "bg-red-500"
-              : isNearLimit
-                ? "bg-amber-500"
-                : "bg-primary/40"
-          }`}
-          style={{ width: `${Math.min(usagePercent, 100)}%` }}
-        />
-      </div>
 
       {/* Editor area */}
       <div className="flex-1 relative overflow-hidden">
@@ -347,6 +278,70 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
 
           {/* Code area with syntax highlighting overlay */}
           <div className="flex-1 relative overflow-hidden">
+            {/* Floating toolbar overlay – top-right inside editor */}
+            <div className="absolute top-2 right-3 flex items-center gap-1.5" style={{ zIndex: 10 }}>
+              <span className="text-[10px] font-mono text-white/50">
+                {lineCount} {lineCount === 1 ? "ln" : "lns"}
+              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                    isOverLimit
+                      ? "bg-red-500/20 text-red-300"
+                      : isNearLimit
+                        ? "bg-amber-500/20 text-amber-300"
+                        : "text-white/50"
+                  }`}>
+                    {isOverLimit && <AlertTriangle className="w-2.5 h-2.5" />}
+                    <span>{formatCharCount(charCount)}</span>
+                    <span className="opacity-40">/</span>
+                    <span>{formatCharCount(maxChars)}</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p className="text-xs">
+                    {charCount.toLocaleString()} / {maxChars.toLocaleString()} chars
+                    {isOverLimit
+                      ? ` — over limit for ${modelName}`
+                      : ` — max for ${modelName}`}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+              <div className="w-px h-3.5 bg-white/20 mx-0.5" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={handleFormat}
+                    disabled={formatMutation.isPending || !content.trim()}
+                    className="p-1 rounded hover:bg-white/15 text-white/60 hover:text-white/90 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                  >
+                    {formatMutation.isPending ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Wand2 className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom"><p className="text-xs">Format SQL</p></TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    className="p-1 rounded hover:bg-white/15 text-white/60 hover:text-white/90 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                  >
+                    {isSaving ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Save className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom"><p className="text-xs">Save query</p></TooltipContent>
+              </Tooltip>
+            </div>
+
             {/* Line highlight layer (behind syntax, behind textarea) */}
             <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 0 }}>
               <div className="py-3 font-mono text-sm leading-[1.625rem]">
