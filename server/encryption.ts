@@ -6,22 +6,40 @@ const PREFIX_V1 = "enc:v1:";
 const PREFIX_V2 = "enc:v2:";
 
 let encryptionKey: Buffer | null = null;
+let encryptionEnabled = false;
 
 /**
  * Initializes the encryption key from the ENCRYPTION_KEY environment variable.
  * Must be called before any encrypt/decrypt operations.
- * The env var can be any string; it will be hashed to derive a 256-bit key.
+ *
+ * In production (NODE_ENV=production), throws if the key is missing.
+ * In development, logs a warning and falls back to plaintext pass-through
+ * so the app can run without configuring the secret.
  */
 export function initEncryption(): void {
   const raw = process.env.ENCRYPTION_KEY;
   if (!raw || raw.length === 0) {
-    throw new Error(
-      "ENCRYPTION_KEY environment variable is required. " +
-      "Set it to any strong secret string (min 16 characters recommended)."
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "ENCRYPTION_KEY environment variable is required in production. " +
+        "Set it to any strong secret string (min 16 characters recommended)."
+      );
+    }
+    console.warn(
+      "[encryption] ENCRYPTION_KEY not set — encryption disabled. " +
+      "Data will be stored in plaintext. Set ENCRYPTION_KEY for encrypted storage."
     );
+    encryptionEnabled = false;
+    return;
   }
   // Derive a 256-bit key from the secret using SHA-256
   encryptionKey = crypto.createHash("sha256").update(raw).digest();
+  encryptionEnabled = true;
+}
+
+/** Returns true if encryption is active (key was provided). */
+export function isEncryptionEnabled(): boolean {
+  return encryptionEnabled;
 }
 
 function getKey(): Buffer {
@@ -48,6 +66,11 @@ function getKey(): Buffer {
 export function encrypt(plaintext: string | null | undefined, aad?: string | null): string | null {
   if (plaintext === null || plaintext === undefined) {
     return null;
+  }
+
+  // When no key is configured, store plaintext (development mode)
+  if (!encryptionEnabled) {
+    return plaintext;
   }
 
   const key = getKey();
@@ -87,9 +110,20 @@ export function decrypt(ciphertext: string | null | undefined, expectedAad?: str
     return null;
   }
 
-  // Pass through plaintext that was stored before encryption was enabled
+  // Pass through plaintext that was stored before encryption was enabled,
+  // or when encryption is disabled in development
   if (!ciphertext.startsWith("enc:")) {
     return ciphertext;
+  }
+
+  // If data is encrypted but we have no key, we can't decrypt — this
+  // shouldn't happen in normal operation (means key was removed after data
+  // was encrypted). Throw a clear error rather than silently corrupting.
+  if (!encryptionEnabled) {
+    throw new Error(
+      "Cannot decrypt data: ENCRYPTION_KEY is not set but encrypted data was found. " +
+      "Set ENCRYPTION_KEY to the same value used when the data was encrypted."
+    );
   }
 
   const key = getKey();
