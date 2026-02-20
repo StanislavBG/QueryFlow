@@ -224,6 +224,50 @@ export function useAskQuestion() {
   });
 }
 
+// ─── Chat Messages (persistent conversations) ──────────────────────
+
+export function useChatMessages() {
+  return useQuery<Array<{ id: number; userId: string | null; role: string; content: string; queryId: number | null; createdAt: string }>>({
+    queryKey: ["chat-messages"],
+    queryFn: async () => {
+      const res = await fetch("/api/chat");
+      if (!res.ok) throw new Error("Failed to fetch chat messages");
+      return res.json();
+    },
+  });
+}
+
+export function useSaveChatMessage() {
+  const queryClient = useQueryClient();
+  return useMutation<any, Error, { role: "user" | "assistant"; content: string; queryId?: number }>({
+    mutationFn: async (data) => {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to save chat message");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chat-messages"] });
+    },
+  });
+}
+
+export function useClearChatMessages() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error>({
+    mutationFn: async () => {
+      const res = await fetch("/api/chat", { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to clear chat messages");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chat-messages"] });
+    },
+  });
+}
+
 // ─── User Schemas ────────────────────────────────────────────────────
 
 export function useUserSchemas() {
@@ -247,6 +291,24 @@ export function useCreateUserSchema() {
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error("Failed to create schema");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["schemas"] });
+    },
+  });
+}
+
+export function useUpdateUserSchema() {
+  const queryClient = useQueryClient();
+  return useMutation<UserSchema, Error, { id: number; data: { name?: string; rawContent?: string; parsedDdl?: string; tables?: Array<{ name: string; columns: string[] }> } }>({
+    mutationFn: async ({ id, data }) => {
+      const res = await fetch(`/api/schemas/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update schema");
       return res.json();
     },
     onSuccess: () => {
