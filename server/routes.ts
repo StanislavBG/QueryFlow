@@ -39,6 +39,22 @@ export const CATEGORY_DESCRIPTIONS: Record<AnalysisCategory, { name: string; des
   },
 };
 
+import type { UserSchema } from "@shared/schema";
+
+/** Build schema context string for LLM prompts, including descriptions as SQL comments. */
+function buildSchemaContext(schemas: UserSchema[]): string | undefined {
+  if (schemas.length === 0) return undefined;
+  const combined = schemas.map(s => {
+    const parts: string[] = [];
+    if (s.description) {
+      parts.push(s.description.split('\n').map(l => `-- ${l}`).join('\n'));
+    }
+    if (s.parsedDdl) parts.push(s.parsedDdl);
+    return parts.join('\n');
+  }).filter(s => s.length > 0).join('\n\n');
+  return combined || undefined;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -191,9 +207,7 @@ export async function registerRoutes(
 
     // Gather schema context
     const schemas = await storage.getUserSchemas();
-    const schemaContext = schemas.length > 0
-      ? schemas.map(s => s.parsedDdl).filter(Boolean).join("\n\n")
-      : undefined;
+    const schemaContext = buildSchemaContext(schemas);
 
     // Gather document context
     const docs = await storage.getDocuments();
@@ -377,6 +391,7 @@ export async function registerRoutes(
         name: z.string().min(1),
         rawContent: z.string().min(1),
         fileName: z.string().optional(),
+        description: z.string().optional(),
       }).parse(req.body);
 
       const { userId } = getAuth(req);
@@ -402,6 +417,7 @@ export async function registerRoutes(
         tables,
         fileName: input.fileName ?? null,
         userId: userId || null,
+        description: input.description ?? "",
       });
 
       res.status(201).json(schema);
@@ -422,6 +438,7 @@ export async function registerRoutes(
         rawContent: z.string().optional(),
         parsedDdl: z.string().optional(),
         tables: z.array(z.object({ name: z.string(), columns: z.array(z.string()) })).optional(),
+        description: z.string().optional(),
       }).parse(req.body);
 
       // If rawContent changes and LLM is available, re-parse
