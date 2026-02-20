@@ -88,6 +88,26 @@ export async function ensureTables(): Promise<void> {
         query_id INTEGER,
         created_at TIMESTAMP DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS app_users (
+        id SERIAL PRIMARY KEY,
+        clerk_id VARCHAR(255) NOT NULL UNIQUE,
+        email VARCHAR(255) NOT NULL,
+        role VARCHAR(20) NOT NULL DEFAULT 'user',
+        display_name VARCHAR(255),
+        first_seen TIMESTAMP DEFAULT NOW(),
+        last_active TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS activity_events (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(255),
+        action VARCHAR(100) NOT NULL,
+        resource VARCHAR(50),
+        resource_id INTEGER,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW()
+      );
     `);
   } finally {
     client.release();

@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, desc, and, isNull, or } from "drizzle-orm";
+import { eq, desc, and, isNull, or, sql, count } from "drizzle-orm";
 import {
   documents,
   sqlQueries,
@@ -7,6 +7,8 @@ import {
   agentSettings,
   userSchemas,
   chatMessages,
+  appUsers,
+  activityEvents,
   type CreateDocumentRequest,
   type DocumentResponse,
   type InsertSqlQuery,
@@ -22,6 +24,10 @@ import {
   type UpdateUserSchema,
   type ChatMessage,
   type InsertChatMessage,
+  type AppUser,
+  type InsertAppUser,
+  type ActivityEvent,
+  type InsertActivityEvent,
 } from "@shared/schema";
 import { encrypt, decrypt, encryptJson, decryptJson } from "./encryption";
 
@@ -62,6 +68,18 @@ export interface IStorage {
   getChatMessages(userId?: string): Promise<ChatMessage[]>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
   clearChatMessages(userId?: string): Promise<void>;
+
+  // App Users (RBAC)
+  getAppUserByClerkId(clerkId: string): Promise<AppUser | undefined>;
+  upsertAppUser(user: InsertAppUser): Promise<AppUser>;
+  getAllAppUsers(): Promise<AppUser[]>;
+  touchUserActivity(clerkId: string): Promise<void>;
+
+  // Activity Events
+  logActivity(event: InsertActivityEvent): Promise<ActivityEvent>;
+  getActivityEvents(opts?: { userId?: string; limit?: number; offset?: number }): Promise<ActivityEvent[]>;
+  getActivityCount(userId?: string): Promise<number>;
+  getActivityEventsByAction(action: string, since?: Date): Promise<ActivityEvent[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,6 +373,78 @@ export class DatabaseStorage implements IStorage {
     } else {
       await db.delete(chatMessages);
     }
+  }
+
+  // App Users (RBAC)
+  async getAppUserByClerkId(clerkId: string): Promise<AppUser | undefined> {
+    const [user] = await db.select().from(appUsers).where(eq(appUsers.clerkId, clerkId));
+    return user;
+  }
+
+  async upsertAppUser(user: InsertAppUser): Promise<AppUser> {
+    const existing = await this.getAppUserByClerkId(user.clerkId);
+    if (existing) {
+      const [updated] = await db
+        .update(appUsers)
+        .set({ email: user.email, displayName: user.displayName, lastActive: new Date() })
+        .where(eq(appUsers.clerkId, user.clerkId))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(appUsers).values(user).returning();
+    return created;
+  }
+
+  async getAllAppUsers(): Promise<AppUser[]> {
+    return await db.select().from(appUsers).orderBy(desc(appUsers.lastActive));
+  }
+
+  async touchUserActivity(clerkId: string): Promise<void> {
+    await db
+      .update(appUsers)
+      .set({ lastActive: new Date() })
+      .where(eq(appUsers.clerkId, clerkId));
+  }
+
+  // Activity Events
+  async logActivity(event: InsertActivityEvent): Promise<ActivityEvent> {
+    const [created] = await db.insert(activityEvents).values(event).returning();
+    return created;
+  }
+
+  async getActivityEvents(opts?: { userId?: string; limit?: number; offset?: number }): Promise<ActivityEvent[]> {
+    const limit = opts?.limit ?? 200;
+    const offset = opts?.offset ?? 0;
+    if (opts?.userId) {
+      return await db.select().from(activityEvents)
+        .where(eq(activityEvents.userId, opts.userId))
+        .orderBy(desc(activityEvents.createdAt))
+        .limit(limit).offset(offset);
+    }
+    return await db.select().from(activityEvents)
+      .orderBy(desc(activityEvents.createdAt))
+      .limit(limit).offset(offset);
+  }
+
+  async getActivityCount(userId?: string): Promise<number> {
+    if (userId) {
+      const [result] = await db.select({ count: count() }).from(activityEvents)
+        .where(eq(activityEvents.userId, userId));
+      return result?.count ?? 0;
+    }
+    const [result] = await db.select({ count: count() }).from(activityEvents);
+    return result?.count ?? 0;
+  }
+
+  async getActivityEventsByAction(action: string, since?: Date): Promise<ActivityEvent[]> {
+    if (since) {
+      return await db.select().from(activityEvents)
+        .where(and(eq(activityEvents.action, action), sql`${activityEvents.createdAt} >= ${since}`))
+        .orderBy(desc(activityEvents.createdAt));
+    }
+    return await db.select().from(activityEvents)
+      .where(eq(activityEvents.action, action))
+      .orderBy(desc(activityEvents.createdAt));
   }
 }
 
