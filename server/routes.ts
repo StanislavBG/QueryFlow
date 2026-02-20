@@ -535,16 +535,6 @@ export async function registerRoutes(
     }
   }).catch(console.error);
 
-  // Seed a default blank query so the editor is immediately ready for paste
-  storage.getSqlQueries().then(async (queries) => {
-    if (queries.length === 0) {
-      await storage.createSqlQuery({
-        title: "Untitled Query",
-        content: "",
-      });
-    }
-  }).catch(console.error);
-
   // Seed agent settings for all analysis categories
   storage.getAgentSettings().then(async (settings) => {
     const existingTypes = new Set(settings.map(s => s.agentType));

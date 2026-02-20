@@ -76,33 +76,39 @@ export function QueryDocumentList({ selectedId, onSelect }: QueryDocumentListPro
               <p className="text-xs text-muted-foreground">No queries yet</p>
             </div>
           ) : (
-            queries.map((query: SqlQuery) => (
-              <button
-                key={query.id}
-                onClick={() => onSelect(query.id)}
-                className={`w-full text-left px-3 py-2.5 rounded-md text-sm group ${
-                  selectedId === query.id
-                    ? "bg-accent border border-border text-foreground"
-                    : "hover:bg-accent/50 border border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <FileCode2 className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span className="truncate font-medium">{query.title}</span>
+            queries.map((query: SqlQuery) => {
+              const hasDraft = query.draftContent != null && query.draftContent !== query.content;
+              return (
+                <button
+                  key={query.id}
+                  onClick={() => onSelect(query.id)}
+                  className={`w-full text-left px-3 py-2.5 rounded-md text-sm group ${
+                    selectedId === query.id
+                      ? "bg-accent border border-border text-foreground"
+                      : "hover:bg-accent/50 border border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <FileCode2 className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="truncate font-medium">{query.title}</span>
+                      {hasDraft && (
+                        <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-amber-500" title="Unsaved draft" />
+                      )}
+                    </div>
+                    <button
+                      onClick={(e) => handleDelete(e, query.id)}
+                      className="opacity-0 group-hover:opacity-100 p-1 hover:bg-destructive/20 rounded transition-all"
+                    >
+                      <Trash2 className="w-3 h-3 text-destructive" />
+                    </button>
                   </div>
-                  <button
-                    onClick={(e) => handleDelete(e, query.id)}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-destructive/20 rounded transition-all"
-                  >
-                    <Trash2 className="w-3 h-3 text-destructive" />
-                  </button>
-                </div>
-                <p className="text-[10px] mt-1 opacity-60 pl-5.5">
-                  {query.updatedAt ? format(new Date(query.updatedAt), "MMM d, HH:mm") : ""}
-                </p>
-              </button>
-            ))
+                  <p className="text-[10px] mt-1 opacity-60 pl-5.5">
+                    {query.updatedAt ? format(new Date(query.updatedAt), "MMM d, HH:mm") : ""}
+                  </p>
+                </button>
+              );
+            })
           )}
         </div>
       </ScrollArea>
