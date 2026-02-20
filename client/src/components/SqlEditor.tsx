@@ -3,7 +3,7 @@ import { useUpdateSqlQuery, useFormatQuery } from "@/hooks/use-sql-queries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Wand2, Save, Loader2, Pencil, Check, AlertTriangle, Minus, Plus } from "lucide-react";
+import { Wand2, Save, Loader2, Pencil, Check, AlertTriangle, Minus, Plus, Highlighter } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { SqlQuery } from "@shared/schema";
 
@@ -68,11 +68,13 @@ interface SqlEditorProps {
   dialect?: string;
   highlightedLines?: Set<number>;
   onLineHover?: (lineNumber: number | null) => void;
+  onCursorLineChange?: (lineNumber: number | null) => void;
 }
 
 const FONT_SIZE_STEPS = [12, 13, 14, 15, 16, 18, 20];
 const DEFAULT_FONT_SIZE = 14;
 const FONT_SIZE_STORAGE_KEY = "queryflow-editor-font-size";
+const HIGHLIGHT_STORAGE_KEY = "queryflow-editor-highlights";
 
 function getStoredFontSize(): number {
   try {
@@ -85,14 +87,19 @@ function getStoredFontSize(): number {
   return DEFAULT_FONT_SIZE;
 }
 
-export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect, highlightedLines, onLineHover }: SqlEditorProps) {
+export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect, highlightedLines, onLineHover, onCursorLineChange }: SqlEditorProps) {
   // The editor always works with the latest version: draft if available, otherwise saved content
   const [content, setContent] = useState(query.draftContent ?? query.content);
   const [title, setTitle] = useState(query.title);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hoveredLineNum, setHoveredLineNum] = useState<number | null>(null);
+  const [cursorLine, setCursorLine] = useState<number | null>(null);
+  const [hoveredCodeLine, setHoveredCodeLine] = useState<number | null>(null);
   const [fontSize, setFontSize] = useState(getStoredFontSize);
+  const [highlightsEnabled, setHighlightsEnabled] = useState(() => {
+    try { return localStorage.getItem(HIGHLIGHT_STORAGE_KEY) !== "off"; } catch { return true; }
+  });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   const updateMutation = useUpdateSqlQuery();
@@ -233,13 +240,50 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
     });
   }, []);
 
+  const toggleHighlights = useCallback(() => {
+    setHighlightsEnabled((prev) => {
+      const next = !prev;
+      try { localStorage.setItem(HIGHLIGHT_STORAGE_KEY, next ? "on" : "off"); } catch {}
+      return next;
+    });
+  }, []);
+
   const lineCount = content.split("\n").length;
 
   // Handle line hover for feedback linking
   const handleLineNumberHover = useCallback((lineNum: number | null) => {
     setHoveredLineNum(lineNum);
-    onLineHover?.(lineNum);
-  }, [onLineHover]);
+    onLineHover?.(highlightsEnabled ? lineNum : null);
+  }, [onLineHover, highlightsEnabled]);
+
+  // Track cursor (caret) line from textarea selection
+  const updateCursorLine = useCallback(() => {
+    if (!textareaRef.current) return;
+    const pos = textareaRef.current.selectionStart;
+    const line = content.substring(0, pos).split("\n").length;
+    if (line !== cursorLine) {
+      setCursorLine(line);
+      onCursorLineChange?.(highlightsEnabled ? line : null);
+    }
+  }, [content, cursorLine, onCursorLineChange, highlightsEnabled]);
+
+  // Track hover over code area (not just line numbers)
+  const handleCodeMouseMove = useCallback((e: React.MouseEvent<HTMLTextAreaElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const scrollTop = e.currentTarget.scrollTop;
+    const y = e.clientY - rect.top + scrollTop;
+    const padding = 12; // py-3 = 0.75rem = 12px
+    const line = Math.floor((y - padding) / lineHeight) + 1;
+    if (line >= 1 && line <= lineCount) {
+      setHoveredCodeLine(line);
+    } else {
+      setHoveredCodeLine(null);
+    }
+  }, [lineHeight, lineCount]);
+
+  const handleCodeMouseLeave = useCallback(() => {
+    setHoveredCodeLine(null);
+  }, []);
 
   // Merge highlighted lines from feedback hover + locally hovered line
   const activeHighlightedLines = useMemo(() => {
@@ -287,6 +331,22 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
           <Tooltip>
             <TooltipTrigger asChild>
               <button
+                onClick={toggleHighlights}
+                className={`p-1 rounded transition-colors ${
+                  highlightsEnabled
+                    ? "text-primary hover:bg-accent"
+                    : "text-muted-foreground/40 hover:bg-accent hover:text-muted-foreground"
+                }`}
+              >
+                <Highlighter className="w-3.5 h-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom"><p className="text-xs">{highlightsEnabled ? "Disable line highlights" : "Enable line highlights"}</p></TooltipContent>
+          </Tooltip>
+          <div className="w-px h-3.5 bg-border mx-0.5" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
                 onClick={() => changeFontSize(-1)}
                 disabled={fontSize <= FONT_SIZE_STEPS[0]}
                 className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:pointer-events-none transition-colors"
@@ -321,17 +381,20 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
             <div className="px-3 py-3 font-mono" style={{ fontSize: `${fontSize - 2}px`, lineHeight: `${lineHeight}px` }}>
               {Array.from({ length: Math.max(lineCount, 20) }, (_, i) => {
                 const lineNum = i + 1;
-                const isHighlighted = activeHighlightedLines.has(lineNum);
-                const isHovered = hoveredLineNum === lineNum;
+                const isHighlighted = highlightsEnabled && activeHighlightedLines.has(lineNum);
+                const isCursor = highlightsEnabled && cursorLine === lineNum;
+                const isHovered = highlightsEnabled && (hoveredLineNum === lineNum || hoveredCodeLine === lineNum);
                 return (
                   <div
                     key={i}
                     className={`text-right cursor-pointer transition-colors ${
                       isHighlighted
                         ? "text-primary font-bold bg-primary/10 -mx-3 px-3 rounded-sm"
-                        : isHovered
-                          ? "text-foreground"
-                          : "text-muted-foreground/40"
+                        : isCursor
+                          ? "text-foreground font-semibold"
+                          : isHovered
+                            ? "text-foreground"
+                            : "text-muted-foreground/40"
                     }`}
                     onMouseEnter={() => handleLineNumberHover(lineNum)}
                     onMouseLeave={() => handleLineNumberHover(null)}
@@ -420,12 +483,22 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
               <div className="py-3 font-mono" style={{ fontSize: `${fontSize}px`, lineHeight: `${lineHeight}px` }}>
                 {content.split("\n").map((_, i) => {
                   const lineNum = i + 1;
-                  const isHighlighted = activeHighlightedLines.has(lineNum);
+                  const isHighlighted = highlightsEnabled && activeHighlightedLines.has(lineNum);
+                  const isCursor = highlightsEnabled && cursorLine === lineNum;
+                  const isHovered = highlightsEnabled && (hoveredCodeLine === lineNum || hoveredLineNum === lineNum);
                   return (
                     <div
                       key={i}
                       style={{ height: `${lineHeight}px` }}
-                      className={isHighlighted ? "bg-primary/10 border-l-2 border-primary" : ""}
+                      className={
+                        isHighlighted
+                          ? "bg-primary/10 border-l-2 border-primary"
+                          : isCursor
+                            ? "bg-foreground/[0.06]"
+                            : isHovered
+                              ? "bg-foreground/[0.03]"
+                              : ""
+                      }
                     />
                   );
                 })}
@@ -446,6 +519,11 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
               onChange={handleContentChange}
               onScroll={handleScroll}
               onKeyDown={handleKeyDown}
+              onClick={updateCursorLine}
+              onSelect={updateCursorLine}
+              onKeyUp={updateCursorLine}
+              onMouseMove={handleCodeMouseMove}
+              onMouseLeave={handleCodeMouseLeave}
               maxLength={maxChars}
               className="absolute inset-0 w-full h-full px-4 py-3 font-mono bg-transparent text-transparent caret-foreground resize-none outline-none selection:bg-primary/30 selection:text-transparent"
               style={{ fontSize: `${fontSize}px`, lineHeight: `${lineHeight}px`, zIndex: 2 }}

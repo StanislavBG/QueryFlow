@@ -67,11 +67,13 @@ function FeedbackCard({
   feedback,
   queryId,
   isHighlighted,
+  isActiveLineMatch,
   onHover,
 }: {
   feedback: QueryFeedbackRow;
   queryId: number;
   isHighlighted?: boolean;
+  isActiveLineMatch?: boolean;
   onHover?: (feedbackId: number | null) => void;
 }) {
   const [expanded, setExpanded] = useState(!feedback.isResolved);
@@ -85,7 +87,13 @@ function FeedbackCard({
     <div
       className={`rounded-md border ${severity.border} ${severity.bg} ${
         feedback.isResolved ? "opacity-50" : ""
-      } ${isHighlighted ? "ring-2 ring-primary ring-offset-1 ring-offset-background" : ""} transition-all`}
+      } ${
+        isHighlighted
+          ? "ring-2 ring-primary ring-offset-1 ring-offset-background"
+          : isActiveLineMatch
+            ? "ring-1 ring-primary/50 ring-offset-1 ring-offset-background bg-primary/[0.03]"
+            : ""
+      } transition-all`}
       onMouseEnter={() => onHover?.(feedback.id)}
       onMouseLeave={() => onHover?.(null)}
     >
@@ -109,7 +117,11 @@ function FeedbackCard({
               {agent.label}
             </Badge>
             {feedback.lineNumber && (
-              <span className={`text-[10px] ${isHighlighted ? "text-primary font-semibold" : "text-muted-foreground"}`}>
+              <span className={`text-[10px] ${
+                isHighlighted || isActiveLineMatch
+                  ? "text-primary font-semibold"
+                  : "text-muted-foreground"
+              }`}>
                 Line {feedback.lineNumber}
               </span>
             )}
@@ -161,10 +173,11 @@ interface FeedbackPanelProps {
   queryId: number | null;
   dialect?: string;
   hoveredLine?: number | null;
+  activeLine?: number | null;
   onFeedbackHover?: (lineNumbers: Set<number>) => void;
 }
 
-export function FeedbackPanel({ queryId, dialect, hoveredLine, onFeedbackHover }: FeedbackPanelProps) {
+export function FeedbackPanel({ queryId, dialect, hoveredLine, activeLine, onFeedbackHover }: FeedbackPanelProps) {
   const { data: feedback, isLoading: isFeedbackLoading } = useQueryFeedback(queryId);
   const analyzeMutation = useAnalyzeQuery();
   const [filter, setFilter] = useState<string | null>(null);
@@ -198,12 +211,19 @@ export function FeedbackPanel({ queryId, dialect, hoveredLine, onFeedbackHover }
   const errorCount = feedback?.filter(f => f.severity === "error" && !f.isResolved).length || 0;
   const warningCount = feedback?.filter(f => f.severity === "warning" && !f.isResolved).length || 0;
 
-  // Determine which feedback items are highlighted (when hovering a line in the editor)
+  // Determine which feedback items are highlighted
+  // Priority: hoveredLine (explicit line number hover) > activeLine (cursor position)
   const highlightedFeedbackIds = new Set<number>();
-  if (hoveredLine && feedback) {
+  const activeLineFeedbackIds = new Set<number>();
+  if (feedback) {
+    const hoverTarget = hoveredLine ?? null;
+    const cursorTarget = activeLine ?? null;
     for (const f of feedback) {
-      if (f.lineNumber === hoveredLine) {
+      if (f.lineNumber && hoverTarget && f.lineNumber === hoverTarget) {
         highlightedFeedbackIds.add(f.id);
+      }
+      if (f.lineNumber && cursorTarget && f.lineNumber === cursorTarget) {
+        activeLineFeedbackIds.add(f.id);
       }
     }
   }
@@ -315,6 +335,7 @@ export function FeedbackPanel({ queryId, dialect, hoveredLine, onFeedbackHover }
                   feedback={item}
                   queryId={queryId}
                   isHighlighted={highlightedFeedbackIds.has(item.id)}
+                  isActiveLineMatch={activeLineFeedbackIds.has(item.id)}
                   onHover={handleFeedbackHover}
                 />
               ))

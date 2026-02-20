@@ -107,8 +107,9 @@ export default function Editor() {
   const [, setLocation] = useLocation();
   const isAdmin = currentUser?.authenticated && currentUser?.role === "admin";
 
-  // Hover linking state between editor and feedback panel
+  // Hover/cursor linking state between editor and feedback panel
   const [hoveredEditorLine, setHoveredEditorLine] = useState<number | null>(null);
+  const [cursorLine, setCursorLine] = useState<number | null>(null);
   const [feedbackHighlightedLines, setFeedbackHighlightedLines] = useState<Set<number>>(new Set());
 
   // Detect dialect from current editor content
@@ -166,6 +167,10 @@ export default function Editor() {
 
   const handleEditorLineHover = useCallback((lineNumber: number | null) => {
     setHoveredEditorLine(lineNumber);
+  }, []);
+
+  const handleCursorLineChange = useCallback((lineNumber: number | null) => {
+    setCursorLine(lineNumber);
   }, []);
 
   const handleFeedbackHover = useCallback((lineNumbers: Set<number>) => {
@@ -480,6 +485,7 @@ export default function Editor() {
                         dialect={detectedDialect}
                         highlightedLines={editorHighlightedLines}
                         onLineHover={handleEditorLineHover}
+                        onCursorLineChange={handleCursorLineChange}
                       />
                     ) : (
                       <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
@@ -521,6 +527,7 @@ export default function Editor() {
                   queryId={selectedQueryId}
                   dialect={detectedDialect}
                   hoveredLine={hoveredEditorLine}
+                  activeLine={cursorLine}
                   onFeedbackHover={handleFeedbackHover}
                 />
               )}
