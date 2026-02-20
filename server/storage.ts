@@ -41,6 +41,7 @@ export interface IStorage {
   getFeedbackByQueryId(queryId: number): Promise<QueryFeedbackRow[]>;
   createFeedback(feedback: InsertFeedback): Promise<QueryFeedbackRow>;
   createFeedbackBatch(items: InsertFeedback[]): Promise<QueryFeedbackRow[]>;
+  deleteFeedbackById(id: number): Promise<void>;
   deleteFeedbackByQueryId(queryId: number): Promise<void>;
   resolveFeedback(id: number): Promise<QueryFeedbackRow | undefined>;
 
@@ -199,6 +200,10 @@ export class DatabaseStorage implements IStorage {
     }));
     const rows = await db.insert(queryFeedback).values(encrypted).returning();
     return rows.map(decryptFeedback);
+  }
+
+  async deleteFeedbackById(id: number): Promise<void> {
+    await db.delete(queryFeedback).where(eq(queryFeedback.id, id));
   }
 
   async deleteFeedbackByQueryId(queryId: number): Promise<void> {
