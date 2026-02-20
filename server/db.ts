@@ -63,15 +63,6 @@ export async function ensureTables(): Promise<void> {
         updated_at TIMESTAMP DEFAULT NOW()
       );
 
-      CREATE TABLE IF NOT EXISTS formatting_rules (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(100) NOT NULL UNIQUE,
-        description TEXT,
-        enabled BOOLEAN NOT NULL DEFAULT true,
-        value TEXT NOT NULL DEFAULT '',
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
-
       CREATE TABLE IF NOT EXISTS user_schemas (
         id SERIAL PRIMARY KEY,
         user_id VARCHAR(255),

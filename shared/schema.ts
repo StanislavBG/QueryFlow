@@ -76,26 +76,6 @@ export type AgentSettings = typeof agentSettings.$inferSelect;
 export type InsertAgentSettings = z.infer<typeof insertAgentSettingsSchema>;
 export type UpdateAgentSettings = z.infer<typeof updateAgentSettingsSchema>;
 
-// Formatting Rules table
-export const formattingRules = pgTable("formatting_rules", {
-  id: serial("id").primaryKey(),
-  name: varchar("name", { length: 100 }).notNull().unique(),
-  description: text("description"),
-  enabled: boolean("enabled").notNull().default(true),
-  value: text("value").notNull().default(""),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
-
-export const insertFormattingRuleSchema = createInsertSchema(formattingRules).omit({ id: true, updatedAt: true });
-export const updateFormattingRuleSchema = z.object({
-  enabled: z.boolean().optional(),
-  value: z.string().optional(),
-});
-
-export type FormattingRule = typeof formattingRules.$inferSelect;
-export type InsertFormattingRule = z.infer<typeof insertFormattingRuleSchema>;
-export type UpdateFormattingRule = z.infer<typeof updateFormattingRuleSchema>;
-
 // User Schemas table (DDL definitions for validation)
 export const userSchemas = pgTable("user_schemas", {
   id: serial("id").primaryKey(),
