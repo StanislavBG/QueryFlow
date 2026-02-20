@@ -33,7 +33,7 @@ export async function llmFormatQuery(
     : "";
 
   const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
+    model: "claude-opus-4-6-20250918",
     max_tokens: 8192,
     messages: [
       {
@@ -153,7 +153,7 @@ export async function llmAnalyzeQuery(
   }).filter(Boolean).join("\n");
 
   const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
+    model: "claude-opus-4-6-20250918",
     max_tokens: 4096,
     messages: [
       {
@@ -235,7 +235,7 @@ export async function llmAskQuestion(
   parts.push("\nProvide a clear, helpful answer. Use markdown formatting. If suggesting SQL changes, show the code.");
 
   const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
+    model: "claude-opus-4-6-20250918",
     max_tokens: 4096,
     messages: [{ role: "user", content: parts.join("\n") }],
   });
@@ -253,7 +253,7 @@ export async function llmParseSchema(
   const anthropic = getClient();
 
   const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
+    model: "claude-opus-4-6-20250918",
     max_tokens: 4096,
     messages: [
       {
