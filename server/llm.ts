@@ -394,26 +394,42 @@ export async function llmParseSchema(
 
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
-    max_tokens: 4096,
+    max_tokens: 16384,
     messages: [
       {
         role: "user",
-        content: `Parse the following content from file "${fileName}" into clean SQL schema definitions (CREATE TABLE statements). The content may be:
-- Raw DDL/SQL
-- CSV headers
-- Tab-separated data
-- JSON schema
-- Plain text descriptions of tables
-- ERD text notation
+        content: `Parse the following content from file "${fileName}" into clean SQL schema definitions (CREATE TABLE statements).
 
-Return a JSON object with:
-- "parsed": the clean CREATE TABLE SQL statements as a string
-- "tables": array of objects with "name" (table name) and "columns" (array of column name strings)
+The content may be in ANY of these formats — detect which one automatically:
 
-If the content is already valid DDL, clean it up and standardize it.
-If it's a data format, infer the schema from the structure.
+1. **MySQL DESCRIBE output** — This is the MOST COMMON format. It looks like:
+   \`\`\`
+   DESCRIBE schema.table_name;
+   column_name    data_type    nullable    key    default    extra
+   \`\`\`
+   Each "DESCRIBE schema.table_name;" line starts a new table definition.
+   The tab-separated lines that follow are columns with fields: column_name, type, nullable (YES/NO), key (PRI/MUL/UNI/""), default, extra.
+   Lines like "USE ...", "SHOW TABLES;", or blank lines should be ignored.
+   Strip the schema prefix (e.g. "gsm.") from table names — only use the table name itself.
+   Columns marked with "PRI" in the key field are PRIMARY KEY columns.
 
-Content:
+2. **Raw DDL/SQL** — CREATE TABLE statements, possibly with ALTER TABLE, indexes, etc.
+3. **CSV/TSV headers** — Column names separated by commas or tabs.
+4. **JSON schema** — JSON objects describing tables and columns.
+5. **Plain text descriptions** — Natural language table/column descriptions.
+6. **ERD text notation** — Text-based entity-relationship diagrams.
+
+Return ONLY a JSON object (no markdown fencing, no explanation) with:
+- "parsed": all the CREATE TABLE SQL statements as a single string, one per table. Include PRIMARY KEY constraints. Use standard SQL types.
+- "tables": array of objects, each with "name" (string, the table name without schema prefix) and "columns" (array of column name strings)
+
+Example output for DESCRIBE input:
+{
+  "parsed": "CREATE TABLE orders (\\n  id INT NOT NULL PRIMARY KEY,\\n  customer_id INT NOT NULL,\\n  total DECIMAL(10,2)\\n);",
+  "tables": [{"name": "orders", "columns": ["id", "customer_id", "total"]}]
+}
+
+Content to parse:
 \`\`\`
 ${rawContent}
 \`\`\``,
@@ -423,15 +439,33 @@ ${rawContent}
 
   const text = response.content[0].type === "text" ? response.content[0].text : "";
 
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  // Try to extract JSON — handle both raw JSON and markdown-fenced JSON
+  const cleaned = text.replace(/```json\s*/g, "").replace(/```\s*/g, "");
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     try {
       const result = JSON.parse(jsonMatch[0]);
       return {
         parsed: result.parsed || rawContent,
-        tables: result.tables || [],
+        tables: Array.isArray(result.tables) ? result.tables : [],
       };
     } catch {
+      // JSON was truncated or malformed — try to salvage partial results
+      try {
+        // Attempt to fix truncated JSON by closing open structures
+        let partial = jsonMatch[0];
+        // If "parsed" exists but "tables" might be cut off, try to extract just parsed
+        const parsedMatch = partial.match(/"parsed"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        const tablesMatch = partial.match(/"tables"\s*:\s*(\[[\s\S]*\])/);
+        if (parsedMatch) {
+          const parsed = parsedMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+          let tables: Array<{ name: string; columns: string[] }> = [];
+          if (tablesMatch) {
+            try { tables = JSON.parse(tablesMatch[1]); } catch { /* use empty */ }
+          }
+          return { parsed, tables };
+        }
+      } catch { /* fall through */ }
       return { parsed: rawContent, tables: [] };
     }
   }
