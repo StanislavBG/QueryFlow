@@ -73,11 +73,12 @@ function decryptDocument(row: DocumentResponse): DocumentResponse {
 }
 
 function decryptSqlQuery(row: SqlQuery): SqlQuery {
+  const aad = row.userId;
   return {
     ...row,
-    title: decrypt(row.title) ?? "Untitled Query",
-    content: decrypt(row.content) ?? "",
-    formattedContent: decrypt(row.formattedContent),
+    title: decrypt(row.title, aad) ?? "Untitled Query",
+    content: decrypt(row.content, aad) ?? "",
+    formattedContent: decrypt(row.formattedContent, aad),
   };
 }
 
@@ -91,19 +92,20 @@ function decryptFeedback(row: QueryFeedbackRow): QueryFeedbackRow {
 }
 
 function decryptUserSchema(row: UserSchema): UserSchema {
+  const aad = row.userId;
   return {
     ...row,
-    name: decrypt(row.name) ?? "",
-    rawContent: decrypt(row.rawContent) ?? "",
-    parsedDdl: decrypt(row.parsedDdl) ?? "",
-    description: decrypt(row.description),
-    fileName: decrypt(row.fileName),
-    tables: decryptJson<Array<{ name: string; columns: string[] }>>(row.tables) ?? [],
+    name: decrypt(row.name, aad) ?? "",
+    rawContent: decrypt(row.rawContent, aad) ?? "",
+    parsedDdl: decrypt(row.parsedDdl, aad) ?? "",
+    description: decrypt(row.description, aad),
+    fileName: decrypt(row.fileName, aad),
+    tables: decryptJson<Array<{ name: string; columns: string[] }>>(row.tables, aad) ?? [],
   };
 }
 
 function decryptChatMessage(row: ChatMessage): ChatMessage {
-  return { ...row, content: decrypt(row.content) ?? "" };
+  return { ...row, content: decrypt(row.content, row.userId) ?? "" };
 }
 
 export class DatabaseStorage implements IStorage {
@@ -141,21 +143,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createSqlQuery(query: InsertSqlQuery): Promise<SqlQuery> {
+    const aad = query.userId;
     const encrypted = {
       ...query,
-      title: encrypt(query.title ?? "Untitled Query") ?? "",
-      content: encrypt(query.content ?? "") ?? "",
-      formattedContent: encrypt(query.formattedContent) ?? undefined,
+      title: encrypt(query.title ?? "Untitled Query", aad) ?? "",
+      content: encrypt(query.content ?? "", aad) ?? "",
+      formattedContent: encrypt(query.formattedContent, aad) ?? undefined,
     };
     const [created] = await db.insert(sqlQueries).values(encrypted).returning();
     return decryptSqlQuery(created);
   }
 
   async updateSqlQuery(id: number, query: UpdateSqlQuery): Promise<SqlQuery | undefined> {
+    // Fetch existing row to get userId for AAD binding
+    const existing = await this.getSqlQuery(id);
+    const aad = query.userId ?? existing?.userId;
     const encrypted: Record<string, unknown> = { updatedAt: new Date() };
-    if (query.title !== undefined) encrypted.title = encrypt(query.title);
-    if (query.content !== undefined) encrypted.content = encrypt(query.content);
-    if (query.formattedContent !== undefined) encrypted.formattedContent = encrypt(query.formattedContent);
+    if (query.title !== undefined) encrypted.title = encrypt(query.title, aad);
+    if (query.content !== undefined) encrypted.content = encrypt(query.content, aad);
+    if (query.formattedContent !== undefined) encrypted.formattedContent = encrypt(query.formattedContent, aad);
     if (query.userId !== undefined) encrypted.userId = query.userId;
 
     const [updated] = await db
@@ -274,15 +280,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createUserSchema(schema: InsertUserSchema): Promise<UserSchema> {
+    const aad = schema.userId;
     const encrypted = {
       ...schema,
-      name: encrypt(schema.name) ?? "",
-      rawContent: encrypt(schema.rawContent) ?? "",
-      parsedDdl: encrypt(schema.parsedDdl ?? "") ?? undefined,
-      description: encrypt(schema.description) ?? undefined,
-      fileName: encrypt(schema.fileName) ?? undefined,
+      name: encrypt(schema.name, aad) ?? "",
+      rawContent: encrypt(schema.rawContent, aad) ?? "",
+      parsedDdl: encrypt(schema.parsedDdl ?? "", aad) ?? undefined,
+      description: encrypt(schema.description, aad) ?? undefined,
+      fileName: encrypt(schema.fileName, aad) ?? undefined,
       tables: schema.tables
-        ? (encryptJson(schema.tables) as unknown as Array<{ name: string; columns: string[] }>)
+        ? (encryptJson(schema.tables, aad) as unknown as Array<{ name: string; columns: string[] }>)
         : undefined,
     };
     const [created] = await db.insert(userSchemas).values(encrypted).returning();
@@ -290,15 +297,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateUserSchema(id: number, schema: UpdateUserSchema): Promise<UserSchema | undefined> {
+    // Fetch existing row to get userId for AAD binding
+    const existing = await this.getUserSchema(id);
+    const aad = schema.userId ?? existing?.userId;
     const setValues: Record<string, unknown> = { updatedAt: new Date() };
-    if (schema.name !== undefined) setValues.name = encrypt(schema.name);
-    if (schema.rawContent !== undefined) setValues.rawContent = encrypt(schema.rawContent);
-    if (schema.parsedDdl !== undefined) setValues.parsedDdl = encrypt(schema.parsedDdl);
-    if (schema.description !== undefined) setValues.description = encrypt(schema.description);
-    if (schema.fileName !== undefined) setValues.fileName = encrypt(schema.fileName);
+    if (schema.name !== undefined) setValues.name = encrypt(schema.name, aad);
+    if (schema.rawContent !== undefined) setValues.rawContent = encrypt(schema.rawContent, aad);
+    if (schema.parsedDdl !== undefined) setValues.parsedDdl = encrypt(schema.parsedDdl, aad);
+    if (schema.description !== undefined) setValues.description = encrypt(schema.description, aad);
+    if (schema.fileName !== undefined) setValues.fileName = encrypt(schema.fileName, aad);
     if (schema.userId !== undefined) setValues.userId = schema.userId;
     if (schema.tables !== undefined) {
-      setValues.tables = encryptJson(schema.tables);
+      setValues.tables = encryptJson(schema.tables, aad);
     }
 
     const [updated] = await db
@@ -330,7 +340,7 @@ export class DatabaseStorage implements IStorage {
   async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
     const encrypted = {
       ...message,
-      content: encrypt(message.content) ?? "",
+      content: encrypt(message.content, message.userId) ?? "",
     };
     const [created] = await db.insert(chatMessages).values(encrypted).returning();
     return decryptChatMessage(created);
