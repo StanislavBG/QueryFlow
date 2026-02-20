@@ -6,6 +6,7 @@ import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
 import { formatSQL } from "./formatter";
 import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema } from "./llm";
+import { tryLocalParse } from "./schema-parser";
 
 // All available analysis categories
 const ALL_CATEGORIES = ["structure", "optimization", "error", "style", "formatting", "documentation"] as const;
@@ -415,8 +416,13 @@ export async function registerRoutes(
       let parsedDdl = input.rawContent;
       let tables: Array<{ name: string; columns: string[] }> = [];
 
-      // Use LLM to parse raw content into structured schema if available
-      if (isLLMConfigured()) {
+      // Fast path: try local parsers first (handles DESCRIBE output, etc.)
+      const localResult = tryLocalParse(input.rawContent);
+      if (localResult) {
+        parsedDdl = localResult.parsed;
+        tables = localResult.tables;
+      } else if (isLLMConfigured()) {
+        // Fall through to LLM for formats that need AI (CSV, JSON, text descriptions)
         try {
           const result = await llmParseSchema(input.rawContent, input.fileName || "schema.sql");
           parsedDdl = result.parsed;
