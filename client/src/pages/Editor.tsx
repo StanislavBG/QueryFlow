@@ -14,12 +14,6 @@ import {
 } from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -188,12 +182,26 @@ export default function Editor() {
 
   // --- workspace tab actions ---
   const addTab = useCallback((type: WorkspaceTabType) => {
-    const titles: Record<WorkspaceTabType, string> = {
-      query: "Query",
-      schemas: "Schemas",
-      visual: "Visual",
-    };
-    const tab: WorkspaceTab = { id: newTabId(), type, title: titles[type] };
+    // Schemas and Visual are singletons — focus the existing tab if one exists
+    if (type === "schemas" || type === "visual") {
+      setTabs((prev) => {
+        const existing = prev.find((t) => t.type === type);
+        if (existing) {
+          setActiveTabId(existing.id);
+          return prev;
+        }
+        const titles: Record<WorkspaceTabType, string> = {
+          query: "Query",
+          schemas: "Schemas",
+          visual: "Visual",
+        };
+        const tab: WorkspaceTab = { id: newTabId(), type, title: titles[type] };
+        setActiveTabId(tab.id);
+        return [...prev, tab];
+      });
+      return;
+    }
+    const tab: WorkspaceTab = { id: newTabId(), type, title: "Query" };
     setTabs((prev) => [...prev, tab]);
     setActiveTabId(tab.id);
   }, []);
@@ -346,69 +354,95 @@ export default function Editor() {
           <ResizablePanel defaultSize={52} minSize={30}>
             <div className="h-full flex flex-col">
               {/* Workspace tab bar */}
-              <div className="flex items-center border-b border-border bg-card flex-shrink-0 overflow-x-auto">
-                {tabs.map((tab) => {
-                  const Icon = TAB_ICON[tab.type];
-                  const isActive = tab.id === activeTabId;
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveTabId(tab.id)}
-                      className={`group relative flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 text-xs font-medium border-r border-border whitespace-nowrap transition-colors ${
-                        isActive
-                          ? "bg-background text-foreground"
-                          : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50"
-                      }`}
-                    >
-                      <Icon className="w-3 h-3 flex-shrink-0" />
-                      <span>{tab.title}</span>
-                      {tabs.length > 1 && (
-                        <span
-                          role="button"
-                          onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
-                          className="ml-1 p-0.5 rounded hover:bg-muted-foreground/20 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <X className="w-2.5 h-2.5" />
-                        </span>
-                      )}
-                      {isActive && (
-                        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
-                      )}
-                    </button>
-                  );
-                })}
+              <div className="flex items-center border-b border-border bg-card flex-shrink-0">
+                {/* Left: query tabs + "+" button */}
+                <div className="flex items-center overflow-x-auto flex-1 min-w-0">
+                  {tabs.filter((t) => t.type === "query").map((tab) => {
+                    const isActive = tab.id === activeTabId;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTabId(tab.id)}
+                        className={`group relative flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 text-xs font-medium border-r border-border whitespace-nowrap transition-colors ${
+                          isActive
+                            ? "bg-background text-foreground"
+                            : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                        }`}
+                      >
+                        <FileCode2 className="w-3 h-3 flex-shrink-0" />
+                        <span>{tab.title}</span>
+                        {tabs.length > 1 && (
+                          <span
+                            role="button"
+                            onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
+                            className="ml-1 p-0.5 rounded hover:bg-muted-foreground/20 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </span>
+                        )}
+                        {isActive && (
+                          <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+                        )}
+                      </button>
+                    );
+                  })}
 
-                {/* "+" dropdown */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="flex items-center justify-center w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors flex-shrink-0">
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-52">
-                    <DropdownMenuItem onClick={() => addTab("query")}>
-                      <FileCode2 className="w-4 h-4 mr-2" />
-                      <div>
-                        <div className="font-medium">New Query</div>
-                        <div className="text-[10px] text-muted-foreground">Open a new SQL editor</div>
-                      </div>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => addTab("schemas")}>
-                      <Table2 className="w-4 h-4 mr-2" />
-                      <div>
-                        <div className="font-medium">Manage Schemas</div>
-                        <div className="text-[10px] text-muted-foreground">Explore ERD &amp; schema definitions</div>
-                      </div>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => addTab("visual")}>
-                      <Boxes className="w-4 h-4 mr-2" />
-                      <div>
-                        <div className="font-medium">Visual</div>
-                        <div className="text-[10px] text-muted-foreground">Visual table &amp; transformation view</div>
-                      </div>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  {/* + new query tab */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => addTab("query")}
+                        className="flex items-center justify-center w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors flex-shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom"><p className="text-xs">New query tab</p></TooltipContent>
+                  </Tooltip>
+                </div>
+
+                {/* Right: pinned singleton tabs */}
+                <div className="flex items-center border-l border-border flex-shrink-0">
+                  {(["schemas", "visual"] as const).map((type) => {
+                    const isActive = activeTab.type === type;
+                    const icon = type === "schemas" ? Table2 : Boxes;
+                    const Icon = icon;
+                    const label = type === "schemas" ? "Schemas" : "Visual";
+                    const tab = tabs.find((t) => t.type === type);
+                    return (
+                      <Tooltip key={type}>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => addTab(type)}
+                            className={`relative flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
+                              isActive
+                                ? "bg-background text-foreground"
+                                : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                            }`}
+                          >
+                            <Icon className="w-3 h-3 flex-shrink-0" />
+                            <span>{label}</span>
+                            {tab && tabs.length > 1 && (
+                              <span
+                                role="button"
+                                onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
+                                className="ml-1 p-0.5 rounded hover:bg-muted-foreground/20 opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <X className="w-2.5 h-2.5" />
+                              </span>
+                            )}
+                            {isActive && (
+                              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+                            )}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">
+                          <p className="text-xs">{type === "schemas" ? "ERD & schema definitions" : "Visual query explorer"}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Workspace tab content */}
