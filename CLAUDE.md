@@ -3,3 +3,32 @@
 ## Architecture Principles
 
 - **All buttons, parsers, and smart features must be LLM-based.** Do not write local heuristic/regex parsing logic or rule-based feature implementations. Any intelligent behavior (schema parsing, format detection, query analysis, etc.) should go through an LLM call.
+
+## Pre-Deploy Checklist (Replit)
+
+After git-sync and before building/deploying, check if any of these apply. If they do, **notify the user with the exact command(s) to run in the Replit Shell before clicking Build/Deploy.**
+
+### 1. Dependencies changed (`package.json` was modified)
+Run in Replit Shell:
+```
+npm install
+```
+
+### 2. New database table or column added to `server/db.ts`
+No manual action needed — `ensureTables()` runs automatically on every server start using `CREATE TABLE IF NOT EXISTS` and `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. Just deploy normally.
+
+**However**, if a column was **renamed or its type changed** (not just added), the user must run a manual migration. Notify the user with the exact `ALTER TABLE` SQL to run in the Replit Database tab or Shell:
+```
+# Example — adjust to the actual change:
+psql $DATABASE_URL -c "ALTER TABLE <table> RENAME COLUMN <old> TO <new>;"
+psql $DATABASE_URL -c "ALTER TABLE <table> ALTER COLUMN <col> TYPE <new_type>;"
+```
+
+### 3. New environment variable introduced
+Notify the user to add it in Replit **Secrets** tab before deploying. List the variable name and a description of what value it expects.
+
+### 4. Schema file (`shared/schema.ts`) changed
+No manual migration step — the Drizzle schema is used only for ORM types and queries, not for migrations. Table creation is handled by `ensureTables()` in `server/db.ts`. If a new table/column was added to the schema, make sure the matching `CREATE TABLE` / `ADD COLUMN` was also added to `ensureTables()`.
+
+### 5. No `drizzle-kit` in this project
+`drizzle-kit` was intentionally removed to prevent Replit's deployment provisioner from generating destructive migrations (DROP TABLE, DROP COLUMN). Do **not** re-add it. All schema management goes through `ensureTables()` in `server/db.ts`.
