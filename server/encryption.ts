@@ -187,6 +187,11 @@ export function encryptJson(value: unknown, aad?: string | null): string | null 
 /**
  * Decrypts a JSONB value. If encrypted, decrypts and parses JSON.
  * If not encrypted (legacy data), returns as-is.
+ *
+ * Handles three cases:
+ * 1. Encrypted string (starts with "enc:") → decrypt then JSON.parse
+ * 2. Plain JSON string (stored without encryption) → JSON.parse
+ * 3. Already-parsed object (native JSONB) → return as-is
  */
 export function decryptJson<T>(value: unknown, expectedAad?: string | null): T | null {
   if (value === null || value === undefined) {
@@ -199,6 +204,17 @@ export function decryptJson<T>(value: unknown, expectedAad?: string | null): T |
     return decrypted ? JSON.parse(decrypted) as T : null;
   }
 
-  // Already a parsed object (legacy unencrypted JSONB)
+  // If it's a non-encrypted string (e.g. JSON stored in JSONB without encryption),
+  // try to parse it. This handles the case where encryptJson serialized to JSON
+  // but encryption was disabled, causing Drizzle to double-encode the value.
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return value as T;
+    }
+  }
+
+  // Already a parsed object (native JSONB)
   return value as T;
 }

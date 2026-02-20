@@ -426,8 +426,10 @@ function extractJsonArray(text: string): unknown[] | null {
 export async function llmParseSchema(
   rawContent: string,
   fileName: string
-): Promise<{ parsed: string; tables: Array<{ name: string; columns: string[] }> }> {
+): Promise<{ parsed: string; tables: Array<{ name: string; columns: string[] }>; error?: string }> {
   const anthropic = getClient();
+
+  console.log("[schema-parser] Starting parse for:", fileName, "content length:", rawContent.length);
 
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
@@ -437,10 +439,10 @@ export async function llmParseSchema(
         role: "user",
         content: `You are a schema-extraction agent. A user uploaded content from file "${fileName}". Your ONLY job: find every database table and column in this content and output structured JSON.
 
-The content can be in ANY format — database client output, SQL, spreadsheets, JSON, documentation, anything. Figure out what it is and extract the schema.
+The content can be in ANY format — database client output (e.g. MySQL DESCRIBE, \\d output), SQL DDL, spreadsheets, CSV, JSON, documentation, anything. Figure out what it is and extract the schema.
 
 RULES:
-- Strip schema/database prefixes from table names (e.g. "mydb.orders" → "orders")
+- Strip schema/database prefixes from table names (e.g. "mydb.orders" → "orders", "gsm.temp_table" → "temp_table")
 - Preserve original data types exactly (e.g. varchar(15), decimal(10,2), int)
 - Identify primary keys and nullability where possible
 - Ignore non-schema content (USE statements, SHOW commands, comments, etc.)
@@ -457,14 +459,17 @@ ${rawContent}`,
 
   const text = response.content[0].type === "text" ? response.content[0].text : "";
 
+  console.log("[schema-parser] LLM response length:", text.length, "preview:", text.slice(0, 500));
+
   const analysis = extractJsonArray(text) as Array<{
     table: string;
     columns: Array<{ name: string; type: string; nullable: boolean; primaryKey: boolean }>;
   }> | null;
 
   if (!analysis || analysis.length === 0) {
-    console.error("Schema parser: LLM returned no parseable tables. Raw response:", text.slice(0, 500));
-    return { parsed: rawContent, tables: [] };
+    const error = `LLM returned no parseable table data. Response preview: ${text.slice(0, 300)}`;
+    console.error("[schema-parser]", error);
+    return { parsed: rawContent, tables: [], error };
   }
 
   // Validate structure — filter out malformed entries
@@ -473,8 +478,9 @@ ${rawContent}`,
   );
 
   if (valid.length === 0) {
-    console.error("Schema parser: LLM returned data but no valid table entries. Parsed:", JSON.stringify(analysis).slice(0, 500));
-    return { parsed: rawContent, tables: [] };
+    const error = `LLM returned data but no valid table entries. Parsed: ${JSON.stringify(analysis).slice(0, 300)}`;
+    console.error("[schema-parser]", error);
+    return { parsed: rawContent, tables: [], error };
   }
 
   // Build CREATE TABLE DDL deterministically from the structured analysis
