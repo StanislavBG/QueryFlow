@@ -33,12 +33,13 @@ export async function ensureTables(): Promise<void> {
         user_id VARCHAR(255),
         title VARCHAR(255) NOT NULL DEFAULT 'Untitled Query',
         content TEXT NOT NULL DEFAULT '',
+        draft_content TEXT,
         formatted_content TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
 
-      -- Add columns to existing tables if missing
+      -- Add columns to existing tables if missing (safe for pre-existing DBs)
       ALTER TABLE sql_queries ADD COLUMN IF NOT EXISTS user_id VARCHAR(255);
       ALTER TABLE sql_queries ADD COLUMN IF NOT EXISTS draft_content TEXT;
 
