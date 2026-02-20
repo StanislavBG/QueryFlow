@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useUpdateSqlQuery, useFormatQuery } from "@/hooks/use-sql-queries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,13 +66,16 @@ interface SqlEditorProps {
   maxChars: number;
   modelName: string;
   dialect?: string;
+  highlightedLines?: Set<number>;
+  onLineHover?: (lineNumber: number | null) => void;
 }
 
-export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect }: SqlEditorProps) {
+export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect, highlightedLines, onLineHover }: SqlEditorProps) {
   const [content, setContent] = useState(query.content);
   const [title, setTitle] = useState(query.title);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [hoveredLineNum, setHoveredLineNum] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   const updateMutation = useUpdateSqlQuery();
@@ -197,6 +200,18 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
 
   const lineCount = content.split("\n").length;
 
+  // Handle line hover for feedback linking
+  const handleLineNumberHover = useCallback((lineNum: number | null) => {
+    setHoveredLineNum(lineNum);
+    onLineHover?.(lineNum);
+  }, [onLineHover]);
+
+  // Merge highlighted lines from feedback hover + locally hovered line
+  const activeHighlightedLines = useMemo(() => {
+    const lines = new Set(highlightedLines);
+    return lines;
+  }, [highlightedLines]);
+
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
@@ -306,20 +321,53 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
           {/* Line numbers */}
           <div className="flex-shrink-0 bg-card border-r border-border select-none overflow-hidden">
             <div className="px-3 py-3 font-mono text-xs leading-[1.625rem]">
-              {Array.from({ length: Math.max(lineCount, 20) }, (_, i) => (
-                <div key={i} className="text-muted-foreground/40 text-right">
-                  {i + 1}
-                </div>
-              ))}
+              {Array.from({ length: Math.max(lineCount, 20) }, (_, i) => {
+                const lineNum = i + 1;
+                const isHighlighted = activeHighlightedLines.has(lineNum);
+                const isHovered = hoveredLineNum === lineNum;
+                return (
+                  <div
+                    key={i}
+                    className={`text-right cursor-pointer transition-colors ${
+                      isHighlighted
+                        ? "text-primary font-bold bg-primary/10 -mx-3 px-3 rounded-sm"
+                        : isHovered
+                          ? "text-foreground"
+                          : "text-muted-foreground/40"
+                    }`}
+                    onMouseEnter={() => handleLineNumberHover(lineNum)}
+                    onMouseLeave={() => handleLineNumberHover(null)}
+                  >
+                    {lineNum}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
           {/* Code area with syntax highlighting overlay */}
           <div className="flex-1 relative overflow-hidden">
+            {/* Line highlight layer (behind syntax, behind textarea) */}
+            <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 0 }}>
+              <div className="py-3 font-mono text-sm leading-[1.625rem]">
+                {content.split("\n").map((_, i) => {
+                  const lineNum = i + 1;
+                  const isHighlighted = activeHighlightedLines.has(lineNum);
+                  return (
+                    <div
+                      key={i}
+                      className={`h-[1.625rem] ${isHighlighted ? "bg-primary/10 border-l-2 border-primary" : ""}`}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Syntax highlight layer */}
             <div
               ref={highlightRef}
               className="absolute inset-0 px-4 py-3 font-mono text-sm leading-[1.625rem] whitespace-pre-wrap break-words overflow-hidden pointer-events-none"
+              style={{ zIndex: 1 }}
               dangerouslySetInnerHTML={{ __html: highlightSQL(content) || '<span class="text-muted-foreground/30">Write your SQL query here...</span>' }}
             />
             {/* Textarea layer */}
@@ -331,6 +379,7 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
               onKeyDown={handleKeyDown}
               maxLength={maxChars}
               className="absolute inset-0 w-full h-full px-4 py-3 font-mono text-sm leading-[1.625rem] bg-transparent text-transparent caret-foreground resize-none outline-none selection:bg-primary/30 selection:text-transparent"
+              style={{ zIndex: 2 }}
               spellCheck={false}
               placeholder="Write your SQL query here..."
             />

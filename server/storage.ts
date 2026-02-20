@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, isNull, or } from "drizzle-orm";
 import {
   documents,
   sqlQueries,
@@ -7,6 +7,7 @@ import {
   agentSettings,
   formattingRules,
   userSchemas,
+  chatMessages,
   type CreateDocumentRequest,
   type DocumentResponse,
   type InsertSqlQuery,
@@ -23,6 +24,8 @@ import {
   type UserSchema,
   type InsertUserSchema,
   type UpdateUserSchema,
+  type ChatMessage,
+  type InsertChatMessage,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -30,8 +33,8 @@ export interface IStorage {
   getDocuments(): Promise<DocumentResponse[]>;
   createDocument(doc: CreateDocumentRequest): Promise<DocumentResponse>;
 
-  // SQL Queries
-  getSqlQueries(): Promise<SqlQuery[]>;
+  // SQL Queries (userId-scoped)
+  getSqlQueries(userId?: string): Promise<SqlQuery[]>;
   getSqlQuery(id: number): Promise<SqlQuery | undefined>;
   createSqlQuery(query: InsertSqlQuery): Promise<SqlQuery>;
   updateSqlQuery(id: number, query: UpdateSqlQuery): Promise<SqlQuery | undefined>;
@@ -56,12 +59,17 @@ export interface IStorage {
   upsertFormattingRule(rule: InsertFormattingRule): Promise<FormattingRule>;
   updateFormattingRule(name: string, update: UpdateFormattingRule): Promise<FormattingRule | undefined>;
 
-  // User Schemas
-  getUserSchemas(): Promise<UserSchema[]>;
+  // User Schemas (userId-scoped)
+  getUserSchemas(userId?: string): Promise<UserSchema[]>;
   getUserSchema(id: number): Promise<UserSchema | undefined>;
   createUserSchema(schema: InsertUserSchema): Promise<UserSchema>;
   updateUserSchema(id: number, schema: UpdateUserSchema): Promise<UserSchema | undefined>;
   deleteUserSchema(id: number): Promise<boolean>;
+
+  // Chat Messages
+  getChatMessages(userId?: string): Promise<ChatMessage[]>;
+  createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
+  clearChatMessages(userId?: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -75,8 +83,13 @@ export class DatabaseStorage implements IStorage {
     return doc;
   }
 
-  // SQL Queries
-  async getSqlQueries(): Promise<SqlQuery[]> {
+  // SQL Queries (userId-scoped)
+  async getSqlQueries(userId?: string): Promise<SqlQuery[]> {
+    if (userId) {
+      return await db.select().from(sqlQueries)
+        .where(or(eq(sqlQueries.userId, userId), isNull(sqlQueries.userId)))
+        .orderBy(desc(sqlQueries.updatedAt));
+    }
     return await db.select().from(sqlQueries).orderBy(desc(sqlQueries.updatedAt));
   }
 
@@ -205,8 +218,13 @@ export class DatabaseStorage implements IStorage {
       .returning();
     return updated;
   }
-  // User Schemas
-  async getUserSchemas(): Promise<UserSchema[]> {
+  // User Schemas (userId-scoped)
+  async getUserSchemas(userId?: string): Promise<UserSchema[]> {
+    if (userId) {
+      return await db.select().from(userSchemas)
+        .where(or(eq(userSchemas.userId, userId), isNull(userSchemas.userId)))
+        .orderBy(desc(userSchemas.updatedAt));
+    }
     return await db.select().from(userSchemas).orderBy(desc(userSchemas.updatedAt));
   }
 
@@ -216,14 +234,23 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createUserSchema(schema: InsertUserSchema): Promise<UserSchema> {
-    const [created] = await db.insert(userSchemas).values(schema).returning();
+    const values = {
+      ...schema,
+      tables: schema.tables ? (schema.tables as Array<{ name: string; columns: string[] }>) : undefined,
+    };
+    const [created] = await db.insert(userSchemas).values(values).returning();
     return created;
   }
 
   async updateUserSchema(id: number, schema: UpdateUserSchema): Promise<UserSchema | undefined> {
+    const setValues = {
+      ...schema,
+      tables: schema.tables ? (schema.tables as Array<{ name: string; columns: string[] }>) : undefined,
+      updatedAt: new Date(),
+    };
     const [updated] = await db
       .update(userSchemas)
-      .set({ ...schema, updatedAt: new Date() })
+      .set(setValues)
       .where(eq(userSchemas.id, id))
       .returning();
     return updated;
@@ -232,6 +259,29 @@ export class DatabaseStorage implements IStorage {
   async deleteUserSchema(id: number): Promise<boolean> {
     const result = await db.delete(userSchemas).where(eq(userSchemas.id, id)).returning();
     return result.length > 0;
+  }
+
+  // Chat Messages
+  async getChatMessages(userId?: string): Promise<ChatMessage[]> {
+    if (userId) {
+      return await db.select().from(chatMessages)
+        .where(eq(chatMessages.userId, userId))
+        .orderBy(chatMessages.createdAt);
+    }
+    return await db.select().from(chatMessages).orderBy(chatMessages.createdAt);
+  }
+
+  async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
+    const [created] = await db.insert(chatMessages).values(message).returning();
+    return created;
+  }
+
+  async clearChatMessages(userId?: string): Promise<void> {
+    if (userId) {
+      await db.delete(chatMessages).where(eq(chatMessages.userId, userId));
+    } else {
+      await db.delete(chatMessages);
+    }
   }
 }
 

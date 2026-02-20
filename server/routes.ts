@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import type { Server } from "http";
-import { clerkMiddleware } from "@clerk/express";
+import { clerkMiddleware, getAuth } from "@clerk/express";
 import { storage } from "./storage";
 import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
@@ -43,7 +43,8 @@ export async function registerRoutes(
   // ─── SQL Query Routes ──────────────────────────────────────────────
 
   app.get(api.sqlQueries.list.path, async (req, res) => {
-    const queries = await storage.getSqlQueries();
+    const { userId } = getAuth(req);
+    const queries = await storage.getSqlQueries(userId || undefined);
     res.json(queries);
   });
 
@@ -62,7 +63,8 @@ export async function registerRoutes(
   app.post(api.sqlQueries.create.path, async (req, res) => {
     try {
       const input = api.sqlQueries.create.input.parse(req.body);
-      const query = await storage.createSqlQuery(input);
+      const { userId } = getAuth(req);
+      const query = await storage.createSqlQuery({ ...input, userId: userId || null });
       res.status(201).json(query);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -86,6 +88,12 @@ export async function registerRoutes(
       if (!query) {
         return res.status(404).json({ message: "Query not found" });
       }
+
+      // Auto-clear feedback when query content is cleared
+      if (input.content !== undefined && input.content.trim() === "") {
+        await storage.deleteFeedbackByQueryId(id);
+      }
+
       res.json(query);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -326,8 +334,9 @@ export async function registerRoutes(
 
   // ─── User Schema Routes ─────────────────────────────────────────────
 
-  app.get("/api/schemas", async (_req, res) => {
-    const schemas = await storage.getUserSchemas();
+  app.get("/api/schemas", async (req, res) => {
+    const { userId } = getAuth(req);
+    const schemas = await storage.getUserSchemas(userId || undefined);
     res.json(schemas);
   });
 
@@ -346,6 +355,8 @@ export async function registerRoutes(
         rawContent: z.string().min(1),
         fileName: z.string().optional(),
       }).parse(req.body);
+
+      const { userId } = getAuth(req);
 
       let parsedDdl = input.rawContent;
       let tables: Array<{ name: string; columns: string[] }> = [];
@@ -367,9 +378,43 @@ export async function registerRoutes(
         parsedDdl,
         tables,
         fileName: input.fileName ?? null,
+        userId: userId || null,
       });
 
       res.status(201).json(schema);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      throw err;
+    }
+  });
+
+  app.patch("/api/schemas/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid schema ID" });
+    try {
+      const input = z.object({
+        name: z.string().min(1).optional(),
+        rawContent: z.string().optional(),
+        parsedDdl: z.string().optional(),
+        tables: z.array(z.object({ name: z.string(), columns: z.array(z.string()) })).optional(),
+      }).parse(req.body);
+
+      // If rawContent changes and LLM is available, re-parse
+      if (input.rawContent && isLLMConfigured()) {
+        try {
+          const result = await llmParseSchema(input.rawContent, "schema.sql");
+          input.parsedDdl = result.parsed;
+          input.tables = result.tables;
+        } catch (err) {
+          console.error("LLM schema re-parse failed:", err);
+        }
+      }
+
+      const schema = await storage.updateUserSchema(id, input);
+      if (!schema) return res.status(404).json({ message: "Schema not found" });
+      res.json(schema);
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
@@ -384,6 +429,43 @@ export async function registerRoutes(
     const deleted = await storage.deleteUserSchema(id);
     if (!deleted) return res.status(404).json({ message: "Schema not found" });
     res.json({ message: "Schema deleted" });
+  });
+
+  // ─── Chat Message Routes ────────────────────────────────────────────
+
+  app.get("/api/chat", async (req, res) => {
+    const { userId } = getAuth(req);
+    const messages = await storage.getChatMessages(userId || undefined);
+    res.json(messages);
+  });
+
+  app.post("/api/chat", async (req, res) => {
+    try {
+      const input = z.object({
+        role: z.enum(["user", "assistant"]),
+        content: z.string().min(1),
+        queryId: z.number().optional(),
+      }).parse(req.body);
+
+      const { userId } = getAuth(req);
+      const message = await storage.createChatMessage({
+        ...input,
+        userId: userId || null,
+        queryId: input.queryId ?? null,
+      });
+      res.status(201).json(message);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      throw err;
+    }
+  });
+
+  app.delete("/api/chat", async (req, res) => {
+    const { userId } = getAuth(req);
+    await storage.clearChatMessages(userId || undefined);
+    res.json({ message: "Chat history cleared" });
   });
 
   // ─── Seed Data ─────────────────────────────────────────────────────
