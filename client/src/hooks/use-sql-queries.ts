@@ -254,7 +254,7 @@ export function useUserSchemas() {
 
 export function useCreateUserSchema() {
   const queryClient = useQueryClient();
-  return useMutation<UserSchema, Error, { name: string; rawContent: string; fileName?: string }>({
+  return useMutation<UserSchema, Error, { name: string; rawContent: string; fileName?: string; description?: string }>({
     mutationFn: async (data) => {
       const res = await fetch("/api/schemas", {
         method: "POST",
@@ -272,7 +272,7 @@ export function useCreateUserSchema() {
 
 export function useUpdateUserSchema() {
   const queryClient = useQueryClient();
-  return useMutation<UserSchema, Error, { id: number; data: { name?: string; rawContent?: string; parsedDdl?: string; tables?: Array<{ name: string; columns: string[] }> } }>({
+  return useMutation<UserSchema, Error, { id: number; data: { name?: string; rawContent?: string; parsedDdl?: string; tables?: Array<{ name: string; columns: string[] }>; description?: string } }>({
     mutationFn: async ({ id, data }) => {
       const res = await fetch(`/api/schemas/${id}`, {
         method: "PATCH",

@@ -71,11 +71,13 @@ export async function ensureTables(): Promise<void> {
         parsed_ddl TEXT NOT NULL DEFAULT '',
         tables JSONB DEFAULT '[]',
         file_name VARCHAR(255),
+        description TEXT DEFAULT '',
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
 
       ALTER TABLE user_schemas ADD COLUMN IF NOT EXISTS user_id VARCHAR(255);
+      ALTER TABLE user_schemas ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
 
       CREATE TABLE IF NOT EXISTS chat_messages (
         id SERIAL PRIMARY KEY,
