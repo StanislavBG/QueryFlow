@@ -93,12 +93,19 @@ ${sql}
 }
 
 /**
- * Analyze a SQL query with LLM and return documentation-standard advice.
+ * Unified query analysis via a single LLM call.
+ * Uses one context window with the query, schema, dialect, documents,
+ * and previously accepted feedback to produce all recommendation categories.
  */
 export async function llmAnalyzeQuery(
   sql: string,
-  dialect: string = "Standard SQL",
-  schemas?: string
+  options: {
+    dialect?: string;
+    schemas?: string;
+    documents?: string;
+    acceptedFeedback?: Array<{ title: string; suggestion: string | null }>;
+    enabledCategories?: string[];
+  } = {}
 ): Promise<Array<{
   agentType: string;
   severity: string;
@@ -109,9 +116,41 @@ export async function llmAnalyzeQuery(
 }>> {
   const anthropic = getClient();
 
-  const schemaContext = schemas
-    ? `\n\nSchema definitions available:\n${schemas}`
-    : "";
+  const dialect = options.dialect || "Standard SQL";
+  const categories = options.enabledCategories || [
+    "structure", "optimization", "error", "style", "formatting", "documentation",
+  ];
+
+  const contextParts: string[] = [];
+
+  contextParts.push(`Detected SQL dialect: ${dialect}`);
+
+  if (options.schemas) {
+    contextParts.push(`\nSchema definitions:\n${options.schemas}`);
+  }
+
+  if (options.documents) {
+    contextParts.push(`\nReference documentation:\n${options.documents}`);
+  }
+
+  if (options.acceptedFeedback && options.acceptedFeedback.length > 0) {
+    const accepted = options.acceptedFeedback
+      .map(f => `- ${f.title}${f.suggestion ? `: ${f.suggestion}` : ""}`)
+      .join("\n");
+    contextParts.push(`\nThe user has already accepted these suggestions (do not repeat them, but use them as context for your preferences understanding):\n${accepted}`);
+  }
+
+  const categoryDescriptions = categories.map(c => {
+    switch (c) {
+      case "structure": return "- **structure**: Query structure, nesting depth, complexity, readability, use of CTEs";
+      case "optimization": return "- **optimization**: Performance patterns (SELECT *, missing WHERE, index usage, N+1 patterns, join efficiency)";
+      case "error": return "- **error**: Potential SQL bugs, typos, unmatched parentheses, ambiguous references, type mismatches";
+      case "style": return "- **style**: Keyword casing consistency, indentation, comma placement, naming conventions";
+      case "formatting": return "- **formatting**: Whitespace, line breaks, alignment, overall visual layout and readability";
+      case "documentation": return "- **documentation**: Comments, query purpose clarity, documentation headers, maintainability for team environments";
+      default: return "";
+    }
+  }).filter(Boolean).join("\n");
 
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
@@ -119,25 +158,31 @@ export async function llmAnalyzeQuery(
     messages: [
       {
         role: "user",
-        content: `You are a constructive SQL documentation advisor. Analyze this SQL query and provide documentation-standard advice. Be non-judgmental and helpful — this is a tool for analysts to improve their work.
+        content: `You are a constructive SQL advisor. Analyze this SQL query and provide actionable feedback. Be non-judgmental and helpful — this is a tool for analysts to improve their work.
 
-Focus on:
-1. Documentation best practices (comments, naming conventions, query documentation headers)
-2. SQL standard compliance (ISO/IEC 9075) and portability concerns
-3. Schema validation (if schemas are provided, check column references, types, table names)
-4. Readability and maintainability for team environments
+${contextParts.join("\n")}
 
-Detected dialect: ${dialect}${schemaContext}
+Analyze across these enabled categories:
+${categoryDescriptions}
 
 Return a JSON array of feedback items. Each item must have:
-- "agentType": always "documentation"
-- "severity": "info" | "warning" | "success" (prefer info and success, use warning sparingly)
+- "agentType": one of ${JSON.stringify(categories)}
+- "severity": "error" | "warning" | "info" | "success"
+  - Use "error" only for actual bugs or likely runtime failures
+  - Use "warning" for things that are probably wrong or will cause problems
+  - Use "info" for suggestions and observations
+  - Use "success" to acknowledge good practices you notice
 - "title": short title (under 60 chars)
 - "message": detailed explanation
 - "suggestion": actionable suggestion or null
-- "lineNumber": relevant line number or null
+- "lineNumber": relevant line number (1-indexed) or null
 
-Keep it to 2-5 items maximum. Be constructive and encouraging.
+Guidelines:
+- Aim for 3-8 items total across all categories — be concise and high-signal
+- Include at least one "success" item if the query has any good practices
+- Do not repeat suggestions the user has already accepted
+- If schemas are provided, validate column references, table names, and types
+- If documents are provided, check for consistency with documented conventions
 
 SQL:
 \`\`\`sql

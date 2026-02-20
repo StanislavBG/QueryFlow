@@ -5,7 +5,6 @@ import {
   sqlQueries,
   queryFeedback,
   agentSettings,
-  formattingRules,
   userSchemas,
   chatMessages,
   type CreateDocumentRequest,
@@ -18,9 +17,6 @@ import {
   type AgentSettings,
   type InsertAgentSettings,
   type UpdateAgentSettings,
-  type FormattingRule,
-  type InsertFormattingRule,
-  type UpdateFormattingRule,
   type UserSchema,
   type InsertUserSchema,
   type UpdateUserSchema,
@@ -52,12 +48,6 @@ export interface IStorage {
   getAgentSettingsByType(agentType: string): Promise<AgentSettings | undefined>;
   upsertAgentSettings(settings: InsertAgentSettings): Promise<AgentSettings>;
   updateAgentSettings(agentType: string, update: UpdateAgentSettings): Promise<AgentSettings | undefined>;
-
-  // Formatting Rules
-  getFormattingRules(): Promise<FormattingRule[]>;
-  getFormattingRule(name: string): Promise<FormattingRule | undefined>;
-  upsertFormattingRule(rule: InsertFormattingRule): Promise<FormattingRule>;
-  updateFormattingRule(name: string, update: UpdateFormattingRule): Promise<FormattingRule | undefined>;
 
   // User Schemas (userId-scoped)
   getUserSchemas(userId?: string): Promise<UserSchema[]>;
@@ -183,41 +173,6 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  // Formatting Rules
-  async getFormattingRules(): Promise<FormattingRule[]> {
-    return await db.select().from(formattingRules);
-  }
-
-  async getFormattingRule(name: string): Promise<FormattingRule | undefined> {
-    const [rule] = await db
-      .select()
-      .from(formattingRules)
-      .where(eq(formattingRules.name, name));
-    return rule;
-  }
-
-  async upsertFormattingRule(rule: InsertFormattingRule): Promise<FormattingRule> {
-    const existing = await this.getFormattingRule(rule.name);
-    if (existing) {
-      const [updated] = await db
-        .update(formattingRules)
-        .set({ ...rule, updatedAt: new Date() })
-        .where(eq(formattingRules.name, rule.name))
-        .returning();
-      return updated;
-    }
-    const [created] = await db.insert(formattingRules).values(rule).returning();
-    return created;
-  }
-
-  async updateFormattingRule(name: string, update: UpdateFormattingRule): Promise<FormattingRule | undefined> {
-    const [updated] = await db
-      .update(formattingRules)
-      .set({ ...update, updatedAt: new Date() })
-      .where(eq(formattingRules.name, name))
-      .returning();
-    return updated;
-  }
   // User Schemas (userId-scoped)
   async getUserSchemas(userId?: string): Promise<UserSchema[]> {
     if (userId) {
