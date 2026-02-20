@@ -38,8 +38,9 @@ export async function ensureTables(): Promise<void> {
         updated_at TIMESTAMP DEFAULT NOW()
       );
 
-      -- Add user_id to existing tables if missing
+      -- Add columns to existing tables if missing
       ALTER TABLE sql_queries ADD COLUMN IF NOT EXISTS user_id VARCHAR(255);
+      ALTER TABLE sql_queries ADD COLUMN IF NOT EXISTS draft_content TEXT;
 
       CREATE TABLE IF NOT EXISTS query_feedback (
         id SERIAL PRIMARY KEY,

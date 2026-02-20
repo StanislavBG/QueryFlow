@@ -5,7 +5,7 @@ import { SqlEditor } from "@/components/SqlEditor";
 import { FeedbackPanel } from "@/components/FeedbackPanel";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { AskModule } from "@/components/AskModule";
-import { SchemaModule } from "@/components/SchemaModule";
+import { SchemaModule, SchemaTreePanel } from "@/components/SchemaModule";
 import { VisualExplorer } from "@/components/VisualExplorer";
 import {
   ResizableHandle,
@@ -119,8 +119,6 @@ export default function Editor() {
   );
   const dialectMeta = DIALECT_META[detectedDialect];
 
-  const [autoCreating, setAutoCreating] = useState(false);
-
   // --- left sidebar tab (contextual to workspace tab type) ---
   type LeftTabKey = "queries" | "ask" | "schemas" | "visual";
 
@@ -150,25 +148,6 @@ export default function Editor() {
       setSelectedQueryId(queries[0].id);
     }
   }, [selectedQueryId, queries, queriesLoading]);
-
-  // Auto-create a blank query when the list is empty
-  useEffect(() => {
-    if (!queriesLoading && queries && queries.length === 0 && !autoCreating && !createMutation.isPending) {
-      setAutoCreating(true);
-      createMutation.mutate(
-        { title: "Untitled Query", content: "" },
-        {
-          onSuccess: (query) => {
-            setSelectedQueryId(query.id);
-            setAutoCreating(false);
-          },
-          onError: () => {
-            setAutoCreating(false);
-          },
-        }
-      );
-    }
-  }, [queriesLoading, queries, autoCreating, createMutation]);
 
   const handleContentChange = useCallback((content: string) => {
     setCurrentContent(content);
@@ -349,7 +328,7 @@ export default function Editor() {
                   />
                 )}
                 {leftTab === "schemas" && (
-                  <SchemaModule />
+                  <SchemaTreePanel />
                 )}
                 {leftTab === "visual" && (
                   <VisualExplorer
@@ -436,7 +415,7 @@ export default function Editor() {
               <div className="flex-1 overflow-hidden">
                 {activeTab.type === "query" && (
                   <>
-                    {(queriesLoading || queryLoading || autoCreating) ? (
+                    {(queriesLoading || queryLoading) ? (
                       <div className="flex items-center justify-center h-full">
                         <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
                       </div>
@@ -451,8 +430,12 @@ export default function Editor() {
                         onLineHover={handleEditorLineHover}
                       />
                     ) : (
-                      <div className="flex items-center justify-center h-full">
-                        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
+                        <FileCode2 className="w-10 h-10 opacity-30" />
+                        <p className="text-sm font-medium">No query selected</p>
+                        <p className="text-xs opacity-60 max-w-[240px] text-center">
+                          Create a new query from the sidebar or select an existing one to get started.
+                        </p>
                       </div>
                     )}
                   </>

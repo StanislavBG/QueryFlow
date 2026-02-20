@@ -71,7 +71,8 @@ interface SqlEditorProps {
 }
 
 export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect, highlightedLines, onLineHover }: SqlEditorProps) {
-  const [content, setContent] = useState(query.content);
+  // The editor always works with the latest version: draft if available, otherwise saved content
+  const [content, setContent] = useState(query.draftContent ?? query.content);
   const [title, setTitle] = useState(query.title);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -81,28 +82,31 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
   const updateMutation = useUpdateSqlQuery();
   const formatMutation = useFormatQuery();
   const { toast } = useToast();
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const charCount = content.length;
   const isOverLimit = charCount > maxChars;
   const usagePercent = Math.min((charCount / maxChars) * 100, 100);
   const isNearLimit = usagePercent > 80;
 
-  // Sync content when query changes
-  useEffect(() => {
-    setContent(query.content);
-    setTitle(query.title);
-  }, [query.id, query.content, query.title]);
+  // Track whether current editor content differs from the last-saved version
+  const hasDraft = content !== query.content;
 
-  // Auto-save with debounce
-  const debouncedSave = useCallback(
+  // Sync content when switching to a different query
+  useEffect(() => {
+    setContent(query.draftContent ?? query.content);
+    setTitle(query.title);
+  }, [query.id, query.content, query.title, query.draftContent]);
+
+  // Auto-save draft with debounce (crash-recovery copy only)
+  const debouncedDraftSave = useCallback(
     (newContent: string) => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
+      if (draftTimeoutRef.current) {
+        clearTimeout(draftTimeoutRef.current);
       }
-      saveTimeoutRef.current = setTimeout(() => {
-        updateMutation.mutate({ id: query.id, data: { content: newContent } });
-      }, 1000);
+      draftTimeoutRef.current = setTimeout(() => {
+        updateMutation.mutate({ id: query.id, data: { draftContent: newContent } });
+      }, 1500);
     },
     [query.id, updateMutation]
   );
@@ -115,7 +119,7 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
       const truncated = newContent.slice(0, maxChars);
       setContent(truncated);
       onContentChange(truncated);
-      debouncedSave(truncated);
+      debouncedDraftSave(truncated);
       toast({
         title: "Character limit reached",
         description: `Max ${formatCharCount(maxChars)} characters for ${modelName}. Content has been truncated.`,
@@ -126,7 +130,7 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
 
     setContent(newContent);
     onContentChange(newContent);
-    debouncedSave(newContent);
+    debouncedDraftSave(newContent);
   };
 
   const handleScroll = () => {
@@ -149,20 +153,21 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
 
       setContent(newContent);
       onContentChange(newContent);
-      debouncedSave(newContent);
+      debouncedDraftSave(newContent);
       requestAnimationFrame(() => {
         textarea.selectionStart = textarea.selectionEnd = start + 2;
       });
     }
   };
 
+  // Manual Save: persists content + title, clears draft
   const handleSave = () => {
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
+    if (draftTimeoutRef.current) {
+      clearTimeout(draftTimeoutRef.current);
     }
     setIsSaving(true);
     updateMutation.mutate(
-      { id: query.id, data: { content, title } },
+      { id: query.id, data: { content, title, draftContent: null } },
       {
         onSuccess: () => {
           setIsSaving(false);
@@ -181,7 +186,8 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
       onSuccess: (result) => {
         setContent(result.formatted);
         onContentChange(result.formatted);
-        updateMutation.mutate({ id: query.id, data: { content: result.formatted, formattedContent: result.formatted } });
+        // Format is an intentional action — save immediately like manual save
+        updateMutation.mutate({ id: query.id, data: { content: result.formatted, formattedContent: result.formatted, draftContent: null } });
         const desc = result.llm
           ? "Query formatted using LLM (ISO/IEC 9075 standards)."
           : "Query formatted using local formatter.";
@@ -240,6 +246,13 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
               <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
             </button>
           )}
+
+          {/* Draft indicator */}
+          {hasDraft && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/15 text-amber-500 border border-amber-500/20">
+              Draft
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
         </div>
@@ -278,19 +291,19 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
 
           {/* Code area with syntax highlighting overlay */}
           <div className="flex-1 relative overflow-hidden">
-            {/* Floating toolbar overlay – top-right inside editor */}
-            <div className="absolute top-2 right-3 flex items-center gap-1.5" style={{ zIndex: 10 }}>
-              <span className="text-[10px] font-mono text-white/50">
+            {/* Floating toolbar overlay – bottom-right inside editor */}
+            <div className="absolute bottom-2 right-3 flex items-center gap-1.5 bg-card/90 backdrop-blur-sm border border-border rounded-md px-2 py-1 shadow-sm" style={{ zIndex: 10 }}>
+              <span className="text-[10px] font-mono text-muted-foreground">
                 {lineCount} {lineCount === 1 ? "ln" : "lns"}
               </span>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono ${
                     isOverLimit
-                      ? "bg-red-500/20 text-red-300"
+                      ? "bg-red-500/15 text-red-500"
                       : isNearLimit
-                        ? "bg-amber-500/20 text-amber-300"
-                        : "text-white/50"
+                        ? "bg-amber-500/15 text-amber-500"
+                        : "text-muted-foreground"
                   }`}>
                     {isOverLimit && <AlertTriangle className="w-2.5 h-2.5" />}
                     <span>{formatCharCount(charCount)}</span>
@@ -307,13 +320,13 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
                   </p>
                 </TooltipContent>
               </Tooltip>
-              <div className="w-px h-3.5 bg-white/20 mx-0.5" />
+              <div className="w-px h-3.5 bg-border mx-0.5" />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     onClick={handleFormat}
                     disabled={formatMutation.isPending || !content.trim()}
-                    className="p-1 rounded hover:bg-white/15 text-white/60 hover:text-white/90 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:pointer-events-none transition-colors"
                   >
                     {formatMutation.isPending ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -329,7 +342,11 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
                   <button
                     onClick={handleSave}
                     disabled={isSaving}
-                    className="p-1 rounded hover:bg-white/15 text-white/60 hover:text-white/90 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    className={`p-1 rounded hover:bg-accent disabled:opacity-30 disabled:pointer-events-none transition-colors ${
+                      hasDraft
+                        ? "text-amber-500 hover:text-amber-400"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
                   >
                     {isSaving ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -338,7 +355,9 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
                     )}
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom"><p className="text-xs">Save query</p></TooltipContent>
+                <TooltipContent side="bottom">
+                  <p className="text-xs">{hasDraft ? "Save query (unsaved changes)" : "Save query"}</p>
+                </TooltipContent>
               </Tooltip>
             </div>
 
