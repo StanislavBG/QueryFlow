@@ -32,6 +32,7 @@ function SchemaCard({
   const [expanded, setExpanded] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(schema.name);
+  const [editDescription, setEditDescription] = useState(schema.description || "");
   const [editDdl, setEditDdl] = useState(schema.parsedDdl || "");
   const [editingTableIndex, setEditingTableIndex] = useState<number | null>(null);
   const [newColumnName, setNewColumnName] = useState("");
@@ -41,7 +42,7 @@ function SchemaCard({
 
   const handleSaveEdit = () => {
     updateMutation.mutate(
-      { id: schema.id, data: { name: editName, rawContent: editDdl } },
+      { id: schema.id, data: { name: editName, rawContent: editDdl, description: editDescription } },
       {
         onSuccess: () => {
           setIsEditing(false);
@@ -57,6 +58,7 @@ function SchemaCard({
   const handleCancelEdit = () => {
     setIsEditing(false);
     setEditName(schema.name);
+    setEditDescription(schema.description || "");
     setEditDdl(schema.parsedDdl || "");
   };
 
@@ -122,6 +124,11 @@ function SchemaCard({
               </span>
             )}
           </div>
+          {schema.description && (
+            <p className="text-[10px] text-muted-foreground/70 truncate mt-0.5">
+              {schema.description.substring(0, 60)}{schema.description.length > 60 ? "..." : ""}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
           <button
@@ -156,6 +163,12 @@ function SchemaCard({
                 onChange={(e) => setEditName(e.target.value)}
                 className="h-7 text-xs"
                 placeholder="Schema name"
+              />
+              <Textarea
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                className="text-xs min-h-[50px] max-h-[100px]"
+                placeholder="Describe this schema (business context, table relationships, conventions...)"
               />
               <Textarea
                 value={editDdl}
@@ -234,6 +247,13 @@ function SchemaCard({
             </div>
           )}
 
+          {/* Description (read-only when not editing) */}
+          {!isEditing && schema.description && (
+            <p className="text-xs text-muted-foreground italic px-1">
+              {schema.description}
+            </p>
+          )}
+
           {/* DDL preview (read-only when not editing) */}
           {!isEditing && schema.parsedDdl && (
             <div className="rounded bg-background border border-border p-2 max-h-[150px] overflow-auto">
@@ -256,6 +276,7 @@ export function SchemaModule() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [schemaName, setSchemaName] = useState("");
+  const [schemaDescription, setSchemaDescription] = useState("");
 
   const processFile = useCallback(
     async (file: File) => {
@@ -263,11 +284,12 @@ export function SchemaModule() {
       const name = schemaName.trim() || file.name.replace(/\.[^.]+$/, "");
 
       createMutation.mutate(
-        { name, rawContent: content, fileName: file.name },
+        { name, rawContent: content, fileName: file.name, description: schemaDescription.trim() || undefined },
         {
           onSuccess: () => {
             toast({ title: "Schema added", description: `"${name}" has been parsed and added.` });
             setSchemaName("");
+            setSchemaDescription("");
           },
           onError: (err) => {
             toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -275,7 +297,7 @@ export function SchemaModule() {
         }
       );
     },
-    [schemaName, createMutation, toast]
+    [schemaName, schemaDescription, createMutation, toast]
   );
 
   const handleDrop = useCallback(
@@ -304,11 +326,12 @@ export function SchemaModule() {
       if (!text.trim()) return;
       const name = schemaName.trim() || "Pasted Schema";
       createMutation.mutate(
-        { name, rawContent: text },
+        { name, rawContent: text, description: schemaDescription.trim() || undefined },
         {
           onSuccess: () => {
             toast({ title: "Schema added", description: `"${name}" has been parsed and added.` });
             setSchemaName("");
+            setSchemaDescription("");
           },
           onError: (err) => {
             toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -316,7 +339,7 @@ export function SchemaModule() {
         }
       );
     },
-    [schemaName, createMutation, toast]
+    [schemaName, schemaDescription, createMutation, toast]
   );
 
   const handleDelete = (id: number) => {
@@ -336,6 +359,14 @@ export function SchemaModule() {
           onChange={(e) => setSchemaName(e.target.value)}
           placeholder="Schema name (optional)"
           className="h-7 text-xs"
+        />
+
+        {/* Description input */}
+        <Textarea
+          value={schemaDescription}
+          onChange={(e) => setSchemaDescription(e.target.value)}
+          placeholder="Schema description (optional)"
+          className="text-xs min-h-[40px] max-h-[80px]"
         />
 
         {/* Drop zone */}
