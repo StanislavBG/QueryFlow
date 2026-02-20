@@ -384,17 +384,44 @@ export async function llmAskQuestion(
 }
 
 /**
+ * Extract a JSON array from LLM text output.
+ *
+ * LLMs often wrap JSON in markdown fences or prepend reasoning text.
+ * This helper tries progressively looser strategies to find the array.
+ */
+function extractJsonArray(text: string): unknown[] | null {
+  // Strip markdown code fences
+  const stripped = text.replace(/```(?:json)?\s*/g, "").replace(/```/g, "");
+
+  // Strategy 1: find the substring starting at the first `[{` and ending at the last `}]`
+  const start = stripped.indexOf("[");
+  const end = stripped.lastIndexOf("]");
+  if (start !== -1 && end > start) {
+    try {
+      const parsed = JSON.parse(stripped.slice(start, end + 1));
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* try next strategy */ }
+  }
+
+  // Strategy 2: try to parse the entire stripped text
+  try {
+    const parsed = JSON.parse(stripped);
+    if (Array.isArray(parsed)) return parsed;
+  } catch { /* give up */ }
+
+  return null;
+}
+
+/**
  * Parse raw text content into structured schema definitions.
  *
- * Uses a two-step LLM agent approach:
- *   Step 1 — Analyze: read the raw content, figure out what it is, identify
- *            every table/column/type/key it can find.
- *   Step 2 — Produce: take that analysis and emit clean CREATE TABLE DDL + a
- *            structured tables array.
+ * Single LLM call to analyze the content and extract structured table/column
+ * metadata. DDL is then built locally from the structured result — this is
+ * deterministic and cannot fail.
  *
- * This avoids assuming any particular format — users may paste MySQL DESCRIBE
- * output, raw DDL, CSV headers, JSON schemas, plain-text notes, or anything
- * else. The LLM acts as a smart schema-extraction agent.
+ * The prompt makes zero format assumptions. Users paste anything — MySQL
+ * DESCRIBE output, raw DDL, CSV headers, JSON schemas, wiki pages, etc.
+ * The LLM acts as a schema-extraction agent that figures it out.
  */
 export async function llmParseSchema(
   rawContent: string,
@@ -402,135 +429,73 @@ export async function llmParseSchema(
 ): Promise<{ parsed: string; tables: Array<{ name: string; columns: string[] }> }> {
   const anthropic = getClient();
 
-  // ── Step 1: Analyze the raw content ──────────────────────────────────
-  const analysisResponse = await anthropic.messages.create({
+  const response = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
     max_tokens: 8192,
     messages: [
       {
         role: "user",
-        content: `You are a schema-parsing agent. Your job is to look at raw content that a user has pasted or uploaded and extract every database table and column definition you can find.
+        content: `You are a schema-extraction agent. A user uploaded content from file "${fileName}". Your ONLY job: find every database table and column in this content and output structured JSON.
 
-The user can paste ANYTHING — there is no fixed format. Read the content carefully, figure out what it represents, and extract the schema information.
+The content can be in ANY format — database client output, SQL, spreadsheets, JSON, documentation, anything. Figure out what it is and extract the schema.
 
-Here are some examples of things users paste (but do NOT limit yourself to these):
-- Output copied from a database client (e.g. DESCRIBE, \\d, SHOW CREATE TABLE, sp_help, etc.)
-- SQL DDL statements
-- Spreadsheet or CSV data with headers
-- JSON or YAML schemas
-- Documentation or wiki pages describing tables
-- ERD or diagram text exports
-- Mixed content with SQL commands, metadata, and table definitions interleaved
+RULES:
+- Strip schema/database prefixes from table names (e.g. "mydb.orders" → "orders")
+- Preserve original data types exactly (e.g. varchar(15), decimal(10,2), int)
+- Identify primary keys and nullability where possible
+- Ignore non-schema content (USE statements, SHOW commands, comments, etc.)
+- Output ONLY the JSON array below — no explanation, no markdown fences, no other text
 
-Your task for this step: analyze the content and produce a structured summary.
+OUTPUT FORMAT — a JSON array, one element per table:
+[{"table":"table_name","columns":[{"name":"col","type":"TYPE","nullable":false,"primaryKey":true}]}]
 
-For EACH table you find, output:
-- The table name (strip any schema/database prefix like "mydb." — just the table name)
-- For each column: the column name, data type (preserve the original type exactly, e.g. varchar(15), decimal(10,2), int), whether it's nullable, and whether it's a primary key or has an index
-
-Think step by step. First identify the boundaries between different tables in the content, then extract columns for each.
-
-Raw content from file "${fileName}":
-\`\`\`
-${rawContent}
-\`\`\`
-
-Produce your analysis as a JSON array (no markdown fencing). Each element:
-{
-  "table": "table_name",
-  "columns": [
-    { "name": "col_name", "type": "DATA_TYPE", "nullable": true/false, "primaryKey": true/false }
-  ]
-}`,
+CONTENT:
+${rawContent}`,
       },
     ],
   });
 
-  const analysisText = analysisResponse.content[0].type === "text" ? analysisResponse.content[0].text : "";
+  const text = response.content[0].type === "text" ? response.content[0].text : "";
 
-  // Extract the analysis JSON
-  const analysisCleaned = analysisText.replace(/```json\s*/g, "").replace(/```\s*/g, "");
-  const analysisMatch = analysisCleaned.match(/\[[\s\S]*\]/);
-  let analysis: Array<{
+  const analysis = extractJsonArray(text) as Array<{
     table: string;
     columns: Array<{ name: string; type: string; nullable: boolean; primaryKey: boolean }>;
-  }> = [];
+  }> | null;
 
-  if (analysisMatch) {
-    try {
-      analysis = JSON.parse(analysisMatch[0]);
-    } catch {
-      // If analysis JSON is malformed, fall through to empty
-    }
-  }
-
-  if (!Array.isArray(analysis) || analysis.length === 0) {
+  if (!analysis || analysis.length === 0) {
+    console.error("Schema parser: LLM returned no parseable tables. Raw response:", text.slice(0, 500));
     return { parsed: rawContent, tables: [] };
   }
 
-  // ── Step 2: Generate clean DDL from the analysis ─────────────────────
-  const ddlResponse = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 16384,
-    messages: [
-      {
-        role: "user",
-        content: `You are a schema-parsing agent. A previous analysis step extracted these table definitions:
+  // Validate structure — filter out malformed entries
+  const valid = analysis.filter(
+    (t) => typeof t.table === "string" && t.table.length > 0 && Array.isArray(t.columns)
+  );
 
-${JSON.stringify(analysis, null, 2)}
-
-Now produce the final output. Generate clean, standard SQL CREATE TABLE statements for every table above. Rules:
-- Preserve the original column data types exactly as analyzed (e.g. VARCHAR(15), DECIMAL(10,2), INT)
-- Mark NOT NULL for non-nullable columns
-- Add a composite PRIMARY KEY(...) constraint at the end of the table if multiple columns are primary keys, or inline PRIMARY KEY for a single PK column
-- One CREATE TABLE per table, separated by blank lines, each ending with a semicolon
-- Do NOT include any schema/database prefix in the table name
-
-Return ONLY a JSON object (no markdown fencing, no extra text):
-{
-  "parsed": "<all CREATE TABLE statements as a single string>",
-  "tables": [{"name": "table_name", "columns": ["col1", "col2", ...]}]
-}`,
-      },
-    ],
-  });
-
-  const ddlText = ddlResponse.content[0].type === "text" ? ddlResponse.content[0].text : "";
-
-  // Extract the final JSON
-  const ddlCleaned = ddlText.replace(/```json\s*/g, "").replace(/```\s*/g, "");
-  const ddlMatch = ddlCleaned.match(/\{[\s\S]*\}/);
-  if (ddlMatch) {
-    try {
-      const result = JSON.parse(ddlMatch[0]);
-      return {
-        parsed: result.parsed || rawContent,
-        tables: Array.isArray(result.tables) ? result.tables : [],
-      };
-    } catch {
-      // DDL JSON malformed — build result from the step-1 analysis directly
-    }
+  if (valid.length === 0) {
+    console.error("Schema parser: LLM returned data but no valid table entries. Parsed:", JSON.stringify(analysis).slice(0, 500));
+    return { parsed: rawContent, tables: [] };
   }
 
-  // Fallback: build DDL from step-1 analysis if step-2 JSON parsing failed
-  const fallbackDdl = analysis.map((t) => {
+  // Build CREATE TABLE DDL deterministically from the structured analysis
+  const ddl = valid.map((t) => {
     const pkCols = t.columns.filter((c) => c.primaryKey).map((c) => c.name);
-    const colDefs = t.columns.map((c) => {
-      const parts = [c.name, c.type];
+    const colLines = t.columns.map((c) => {
+      const parts = [c.name, c.type || "TEXT"];
       if (!c.nullable) parts.push("NOT NULL");
       if (c.primaryKey && pkCols.length === 1) parts.push("PRIMARY KEY");
       return `  ${parts.join(" ")}`;
     });
     if (pkCols.length > 1) {
-      colDefs.push(`  PRIMARY KEY (${pkCols.join(", ")})`);
+      colLines.push(`  PRIMARY KEY (${pkCols.join(", ")})`);
     }
-    return `CREATE TABLE ${t.table} (\n${colDefs.join(",\n")}\n);`;
+    return `CREATE TABLE ${t.table} (\n${colLines.join(",\n")}\n);`;
   }).join("\n\n");
 
-  const fallbackTables = analysis.map((t) => ({
+  const tables = valid.map((t) => ({
     name: t.table,
     columns: t.columns.map((c) => c.name),
   }));
 
-  return { parsed: fallbackDdl, tables: fallbackTables };
+  return { parsed: ddl, tables };
 }
