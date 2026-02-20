@@ -299,13 +299,18 @@ export function SchemaUpload() {
       createMutation.mutate(
         { name, rawContent: content, fileName: file.name, description: schemaDescription.trim() || undefined },
         {
-          onSuccess: () => {
-            toast({ title: "Schema added", description: `"${name}" has been parsed and added.` });
+          onSuccess: (schema) => {
+            const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+            if (tables.length > 0) {
+              toast({ title: "Schema added", description: `"${name}" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
+            } else {
+              toast({ title: "Schema added — no tables detected", description: `"${name}" was saved but no tables could be parsed. Check the file format.`, variant: "destructive" });
+            }
             setSchemaName("");
             setSchemaDescription("");
           },
           onError: (err) => {
-            toast({ title: "Error", description: err.message, variant: "destructive" });
+            toast({ title: "Upload failed", description: err.message, variant: "destructive" });
           },
         }
       );
@@ -340,13 +345,18 @@ export function SchemaUpload() {
       createMutation.mutate(
         { name, rawContent: text, description: schemaDescription.trim() || undefined },
         {
-          onSuccess: () => {
-            toast({ title: "Schema added", description: `"${name}" has been parsed and added.` });
+          onSuccess: (schema) => {
+            const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+            if (tables.length > 0) {
+              toast({ title: "Schema added", description: `"${name}" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
+            } else {
+              toast({ title: "Schema added — no tables detected", description: `"${name}" was saved but no tables could be parsed. Check the content format.`, variant: "destructive" });
+            }
             setSchemaName("");
             setSchemaDescription("");
           },
           onError: (err) => {
-            toast({ title: "Error", description: err.message, variant: "destructive" });
+            toast({ title: "Paste failed", description: err.message, variant: "destructive" });
           },
         }
       );
@@ -514,7 +524,17 @@ export function SchemaERD() {
     return { tables: allTables, relationships: rels, ddl: allDdl };
   }, [schemas]);
 
-  if (tables.length === 0) return null;
+  if (tables.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
+        <Table2 className="w-10 h-10 opacity-30" />
+        <p className="text-sm font-medium">No tables detected</p>
+        <p className="text-xs opacity-60 max-w-[280px] text-center">
+          Schemas were uploaded but no tables could be parsed. Try uploading a DDL file with CREATE TABLE statements, or a MySQL DESCRIBE output.
+        </p>
+      </div>
+    );
+  }
 
   // Layout: arrange tables in a grid
   const cols = Math.min(Math.ceil(Math.sqrt(tables.length)), 4);
@@ -603,12 +623,7 @@ export function SchemaERD() {
 export function SchemaModule() {
   const { data: schemas, isLoading } = useUserSchemas();
 
-  const hasTables = useMemo(() => {
-    if (!schemas) return false;
-    return schemas.some(
-      (s) => ((s.tables as Array<{ name: string; columns: string[] }>) || []).length > 0
-    );
-  }, [schemas]);
+  const hasSchemas = !!schemas && schemas.length > 0;
 
   if (isLoading) {
     return (
@@ -618,6 +633,6 @@ export function SchemaModule() {
     );
   }
 
-  // If we have tables, show ERD; otherwise show upload
-  return hasTables ? <SchemaERD /> : <SchemaUpload />;
+  // If schemas exist, show ERD (even if 0 tables parsed); otherwise show upload
+  return hasSchemas ? <SchemaERD /> : <SchemaUpload />;
 }
