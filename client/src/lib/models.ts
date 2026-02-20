@@ -1,46 +1,11 @@
-// LLM model definitions with context window limits for query input
+// LLM model definition — locked to Claude Opus 4.6
 
-export interface LLMModel {
-  id: string;
-  name: string;
-  provider: string;
-  maxQueryChars: number;
-  contextTokens: number;
-}
-
-export const LLM_MODELS: LLMModel[] = [
-  {
-    id: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
-    provider: "Anthropic",
-    maxQueryChars: 680_000,
-    contextTokens: 200_000,
-  },
-  {
-    id: "claude-sonnet-4-5",
-    name: "Claude Sonnet 4.5",
-    provider: "Anthropic",
-    maxQueryChars: 680_000,
-    contextTokens: 200_000,
-  },
-  {
-    id: "claude-haiku-4-5",
-    name: "Claude Haiku 4.5",
-    provider: "Anthropic",
-    maxQueryChars: 680_000,
-    contextTokens: 200_000,
-  },
-];
-
-export const DEFAULT_MODEL_ID = "claude-sonnet-4-5";
-
-export function getModelById(id: string): LLMModel | undefined {
-  return LLM_MODELS.find((m) => m.id === id);
-}
-
-export function getDefaultModel(): LLMModel {
-  return LLM_MODELS.find((m) => m.id === DEFAULT_MODEL_ID) || LLM_MODELS[0];
-}
+export const MODEL = {
+  id: "claude-opus-4-6",
+  name: "Claude Opus 4.6",
+  maxQueryChars: 680_000,
+  contextTokens: 200_000,
+} as const;
 
 // ── SQL Dialect Detection ────────────────────────────────────────────
 

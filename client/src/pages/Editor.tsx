@@ -12,26 +12,16 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Cpu, Database, Sun, Moon, MessageSquare, Table2, GitBranch } from "lucide-react";
+import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
 import {
-  LLM_MODELS,
-  DEFAULT_MODEL_ID,
-  getModelById,
+  MODEL,
   detectSqlDialect,
   DIALECT_META,
-  type LLMModel,
   type SqlDialect,
 } from "@/lib/models";
 
@@ -65,7 +55,6 @@ function useTheme() {
 
 export default function Editor() {
   const [selectedQueryId, setSelectedQueryId] = useState<number | null>(null);
-  const [selectedModelId, setSelectedModelId] = useState<string>(DEFAULT_MODEL_ID);
   const [currentContent, setCurrentContent] = useState<string>("");
   const { data: queries, isLoading: queriesLoading } = useSqlQueries();
   const { data: selectedQuery, isLoading: queryLoading } = useSqlQuery(selectedQueryId);
@@ -76,8 +65,6 @@ export default function Editor() {
   // Hover linking state between editor and feedback panel
   const [hoveredEditorLine, setHoveredEditorLine] = useState<number | null>(null);
   const [feedbackHighlightedLines, setFeedbackHighlightedLines] = useState<Set<number>>(new Set());
-
-  const selectedModel = getModelById(selectedModelId) || LLM_MODELS[0];
 
   // Detect dialect from current editor content
   const detectedDialect: SqlDialect = useMemo(
@@ -153,15 +140,6 @@ export default function Editor() {
     }));
   }, [schemas]);
 
-  const modelsByProvider = useMemo(() => {
-    const grouped: Record<string, LLMModel[]> = {};
-    for (const m of LLM_MODELS) {
-      if (!grouped[m.provider]) grouped[m.provider] = [];
-      grouped[m.provider].push(m);
-    }
-    return grouped;
-  }, []);
-
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Global top bar */}
@@ -194,44 +172,8 @@ export default function Editor() {
           </Tooltip>
         </div>
 
-        {/* Right: model picker + theme + auth + settings */}
+        {/* Right: theme + auth + settings */}
         <div className="flex items-center gap-2">
-          {/* Model picker */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Cpu className="w-3.5 h-3.5 text-muted-foreground" />
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p className="text-xs">LLM for feedback generation</p>
-            </TooltipContent>
-          </Tooltip>
-          <Select value={selectedModelId} onValueChange={setSelectedModelId}>
-            <SelectTrigger className="h-7 w-[170px] text-xs bg-background border-border">
-              <SelectValue placeholder="Select model" />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(modelsByProvider).map(([provider, models]) => (
-                <div key={provider}>
-                  <div className="px-2 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                    {provider}
-                  </div>
-                  {models.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      <div className="flex items-center justify-between gap-3 w-full">
-                        <span>{model.name}</span>
-                        <span className="text-[10px] text-muted-foreground font-mono">
-                          {(model.maxQueryChars / 1000).toFixed(0)}k
-                        </span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </div>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <div className="h-4 w-px bg-border" />
-
           {/* Dark / Light toggle */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -376,8 +318,8 @@ export default function Editor() {
                 <SqlEditor
                   query={selectedQuery}
                   onContentChange={handleContentChange}
-                  maxChars={selectedModel.maxQueryChars}
-                  modelName={selectedModel.name}
+                  maxChars={MODEL.maxQueryChars}
+                  modelName={MODEL.name}
                   dialect={detectedDialect}
                   highlightedLines={editorHighlightedLines}
                   onLineHover={handleEditorLineHover}
