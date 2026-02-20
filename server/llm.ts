@@ -5,16 +5,25 @@ let client: Anthropic | null = null;
 function getClient(): Anthropic {
   if (!client) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
+    const baseURL = process.env.ANTHROPIC_BASE_URL;
+
+    if (!apiKey && !baseURL) {
       throw new Error("ANTHROPIC_API_KEY is not set. Add it to your environment to enable LLM features.");
     }
-    client = new Anthropic({ apiKey });
+
+    // When a proxy base URL is set without an explicit API key,
+    // the proxy handles authentication — pass a placeholder key
+    // so the SDK doesn't throw at construction time.
+    client = new Anthropic({
+      apiKey: apiKey || "proxy-handled",
+      ...(baseURL ? { baseURL } : {}),
+    });
   }
   return client;
 }
 
 export function isLLMConfigured(): boolean {
-  return !!process.env.ANTHROPIC_API_KEY;
+  return !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_BASE_URL);
 }
 
 /**
@@ -33,7 +42,7 @@ export async function llmFormatQuery(
     : "";
 
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-6-20250918",
+    model: "claude-sonnet-4-5-20250929",
     max_tokens: 8192,
     messages: [
       {
@@ -153,7 +162,7 @@ export async function llmAnalyzeQuery(
   }).filter(Boolean).join("\n");
 
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-6-20250918",
+    model: "claude-sonnet-4-5-20250929",
     max_tokens: 4096,
     messages: [
       {
@@ -252,7 +261,7 @@ Suggestion: ${r.suggestion}`
   )).join("\n\n");
 
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-6-20250918",
+    model: "claude-sonnet-4-5-20250929",
     max_tokens: 4096,
     messages: [
       {
@@ -366,7 +375,7 @@ export async function llmAskQuestion(
   parts.push("\nProvide a clear, helpful answer. Use markdown formatting. If suggesting SQL changes, show the code.");
 
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-6-20250918",
+    model: "claude-sonnet-4-5-20250929",
     max_tokens: 4096,
     messages: [{ role: "user", content: parts.join("\n") }],
   });
@@ -384,7 +393,7 @@ export async function llmParseSchema(
   const anthropic = getClient();
 
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-6-20250918",
+    model: "claude-sonnet-4-5-20250929",
     max_tokens: 4096,
     messages: [
       {

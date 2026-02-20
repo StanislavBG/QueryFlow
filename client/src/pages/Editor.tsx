@@ -5,7 +5,7 @@ import { SqlEditor } from "@/components/SqlEditor";
 import { FeedbackPanel } from "@/components/FeedbackPanel";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { AskModule } from "@/components/AskModule";
-import { SchemaModule } from "@/components/SchemaModule";
+import { SchemaModule, SchemaTreePanel } from "@/components/SchemaModule";
 import { VisualExplorer } from "@/components/VisualExplorer";
 import {
   ResizableHandle,
@@ -328,7 +328,7 @@ export default function Editor() {
                   />
                 )}
                 {leftTab === "schemas" && (
-                  <SchemaModule />
+                  <SchemaTreePanel />
                 )}
                 {leftTab === "visual" && (
                   <VisualExplorer

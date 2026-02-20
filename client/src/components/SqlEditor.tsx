@@ -291,19 +291,19 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
 
           {/* Code area with syntax highlighting overlay */}
           <div className="flex-1 relative overflow-hidden">
-            {/* Floating toolbar overlay – top-right inside editor */}
-            <div className="absolute top-2 right-3 flex items-center gap-1.5" style={{ zIndex: 10 }}>
-              <span className="text-[10px] font-mono text-white/50">
+            {/* Floating toolbar overlay – bottom-right inside editor */}
+            <div className="absolute bottom-2 right-3 flex items-center gap-1.5 bg-card/90 backdrop-blur-sm border border-border rounded-md px-2 py-1 shadow-sm" style={{ zIndex: 10 }}>
+              <span className="text-[10px] font-mono text-muted-foreground">
                 {lineCount} {lineCount === 1 ? "ln" : "lns"}
               </span>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono ${
                     isOverLimit
-                      ? "bg-red-500/20 text-red-300"
+                      ? "bg-red-500/15 text-red-500"
                       : isNearLimit
-                        ? "bg-amber-500/20 text-amber-300"
-                        : "text-white/50"
+                        ? "bg-amber-500/15 text-amber-500"
+                        : "text-muted-foreground"
                   }`}>
                     {isOverLimit && <AlertTriangle className="w-2.5 h-2.5" />}
                     <span>{formatCharCount(charCount)}</span>
@@ -320,13 +320,13 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
                   </p>
                 </TooltipContent>
               </Tooltip>
-              <div className="w-px h-3.5 bg-white/20 mx-0.5" />
+              <div className="w-px h-3.5 bg-border mx-0.5" />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     onClick={handleFormat}
                     disabled={formatMutation.isPending || !content.trim()}
-                    className="p-1 rounded hover:bg-white/15 text-white/60 hover:text-white/90 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:pointer-events-none transition-colors"
                   >
                     {formatMutation.isPending ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -342,10 +342,10 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
                   <button
                     onClick={handleSave}
                     disabled={isSaving}
-                    className={`p-1 rounded hover:bg-white/15 disabled:opacity-30 disabled:pointer-events-none transition-colors ${
+                    className={`p-1 rounded hover:bg-accent disabled:opacity-30 disabled:pointer-events-none transition-colors ${
                       hasDraft
-                        ? "text-amber-400 hover:text-amber-300"
-                        : "text-white/60 hover:text-white/90"
+                        ? "text-amber-500 hover:text-amber-400"
+                        : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     {isSaving ? (
