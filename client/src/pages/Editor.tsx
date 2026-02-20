@@ -1,11 +1,12 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { useSqlQuery, useSqlQueries, useCreateSqlQuery } from "@/hooks/use-sql-queries";
+import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas } from "@/hooks/use-sql-queries";
 import { QueryDocumentList } from "@/components/QueryDocumentList";
 import { SqlEditor } from "@/components/SqlEditor";
 import { FeedbackPanel } from "@/components/FeedbackPanel";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { AskModule } from "@/components/AskModule";
 import { SchemaModule } from "@/components/SchemaModule";
+import { VisualExplorer } from "@/components/VisualExplorer";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -20,7 +21,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Cpu, Database, Sun, Moon, MessageSquare, Table2 } from "lucide-react";
+import { FileCode2, Loader2, Cpu, Database, Sun, Moon, MessageSquare, Table2, GitBranch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
@@ -68,8 +69,13 @@ export default function Editor() {
   const [currentContent, setCurrentContent] = useState<string>("");
   const { data: queries, isLoading: queriesLoading } = useSqlQueries();
   const { data: selectedQuery, isLoading: queryLoading } = useSqlQuery(selectedQueryId);
+  const { data: schemas } = useUserSchemas();
   const createMutation = useCreateSqlQuery();
   const { dark, toggle: toggleTheme } = useTheme();
+
+  // Hover linking state between editor and feedback panel
+  const [hoveredEditorLine, setHoveredEditorLine] = useState<number | null>(null);
+  const [feedbackHighlightedLines, setFeedbackHighlightedLines] = useState<Set<number>>(new Set());
 
   const selectedModel = getModelById(selectedModelId) || LLM_MODELS[0];
 
@@ -81,7 +87,7 @@ export default function Editor() {
   const dialectMeta = DIALECT_META[detectedDialect];
 
   const [autoCreating, setAutoCreating] = useState(false);
-  const [leftTab, setLeftTab] = useState<"queries" | "ask" | "schemas">("queries");
+  const [leftTab, setLeftTab] = useState<"queries" | "ask" | "schemas" | "visual">("queries");
 
   // Auto-select first query if none selected
   useEffect(() => {
@@ -124,6 +130,28 @@ export default function Editor() {
     setSelectedQueryId(id);
     setCurrentContent("");
   }, []);
+
+  const handleEditorLineHover = useCallback((lineNumber: number | null) => {
+    setHoveredEditorLine(lineNumber);
+  }, []);
+
+  const handleFeedbackHover = useCallback((lineNumbers: Set<number>) => {
+    setFeedbackHighlightedLines(lineNumbers);
+  }, []);
+
+  // Merge feedback-highlighted lines for the editor
+  const editorHighlightedLines = useMemo(() => {
+    return feedbackHighlightedLines;
+  }, [feedbackHighlightedLines]);
+
+  // Prepare schema data for VisualExplorer
+  const schemaData = useMemo(() => {
+    if (!schemas) return undefined;
+    return schemas.map(s => ({
+      name: s.name,
+      tables: (s.tables as Array<{ name: string; columns: string[] }>) || [],
+    }));
+  }, [schemas]);
 
   const modelsByProvider = useMemo(() => {
     const grouped: Record<string, LLMModel[]> = {};
@@ -290,6 +318,22 @@ export default function Editor() {
                   </TooltipTrigger>
                   <TooltipContent side="bottom"><p className="text-xs">Manage schema definitions for validation</p></TooltipContent>
                 </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => setLeftTab("visual")}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[10px] font-medium border-b-2 transition-colors ${
+                        leftTab === "visual"
+                          ? "border-primary text-primary"
+                          : "border-transparent text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <GitBranch className="w-3.5 h-3.5" />
+                      Visual
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom"><p className="text-xs">Visual query explorer (tables, joins, relationships)</p></TooltipContent>
+                </Tooltip>
               </div>
 
               {/* Tab content */}
@@ -308,6 +352,12 @@ export default function Editor() {
                 )}
                 {leftTab === "schemas" && (
                   <SchemaModule />
+                )}
+                {leftTab === "visual" && (
+                  <VisualExplorer
+                    queryContent={currentContent}
+                    schemas={schemaData}
+                  />
                 )}
               </div>
             </div>
@@ -329,6 +379,8 @@ export default function Editor() {
                   maxChars={selectedModel.maxQueryChars}
                   modelName={selectedModel.name}
                   dialect={detectedDialect}
+                  highlightedLines={editorHighlightedLines}
+                  onLineHover={handleEditorLineHover}
                 />
               ) : (
                 <div className="flex items-center justify-center h-full">
@@ -343,7 +395,12 @@ export default function Editor() {
           {/* Right panel - Feedback */}
           <ResizablePanel defaultSize={30} minSize={20} maxSize={45}>
             <div className="h-full border-l border-border bg-card">
-              <FeedbackPanel queryId={selectedQueryId} dialect={detectedDialect} />
+              <FeedbackPanel
+                queryId={selectedQueryId}
+                dialect={detectedDialect}
+                hoveredLine={hoveredEditorLine}
+                onFeedbackHover={handleFeedbackHover}
+              />
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>

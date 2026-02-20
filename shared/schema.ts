@@ -21,6 +21,7 @@ export type DocumentsListResponse = Document[];
 // SQL Queries table
 export const sqlQueries = pgTable("sql_queries", {
   id: serial("id").primaryKey(),
+  userId: varchar("user_id", { length: 255 }),
   title: varchar("title", { length: 255 }).notNull().default("Untitled Query"),
   content: text("content").notNull().default(""),
   formattedContent: text("formatted_content"),
@@ -98,6 +99,7 @@ export type UpdateFormattingRule = z.infer<typeof updateFormattingRuleSchema>;
 // User Schemas table (DDL definitions for validation)
 export const userSchemas = pgTable("user_schemas", {
   id: serial("id").primaryKey(),
+  userId: varchar("user_id", { length: 255 }),
   name: varchar("name", { length: 255 }).notNull(),
   rawContent: text("raw_content").notNull(),
   parsedDdl: text("parsed_ddl").notNull().default(""),
@@ -113,3 +115,18 @@ export const updateUserSchemaSchema = insertUserSchemaSchema.partial();
 export type UserSchema = typeof userSchemas.$inferSelect;
 export type InsertUserSchema = z.infer<typeof insertUserSchemaSchema>;
 export type UpdateUserSchema = z.infer<typeof updateUserSchemaSchema>;
+
+// Chat Messages table (persistent conversations)
+export const chatMessages = pgTable("chat_messages", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id", { length: 255 }),
+  role: varchar("role", { length: 20 }).notNull().default("user"),
+  content: text("content").notNull(),
+  queryId: integer("query_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertChatMessageSchema = createInsertSchema(chatMessages).omit({ id: true, createdAt: true });
+
+export type ChatMessage = typeof chatMessages.$inferSelect;
+export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;

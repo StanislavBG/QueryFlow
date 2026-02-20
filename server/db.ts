@@ -30,12 +30,16 @@ export async function ensureTables(): Promise<void> {
 
       CREATE TABLE IF NOT EXISTS sql_queries (
         id SERIAL PRIMARY KEY,
+        user_id VARCHAR(255),
         title VARCHAR(255) NOT NULL DEFAULT 'Untitled Query',
         content TEXT NOT NULL DEFAULT '',
         formatted_content TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
+
+      -- Add user_id to existing tables if missing
+      ALTER TABLE sql_queries ADD COLUMN IF NOT EXISTS user_id VARCHAR(255);
 
       CREATE TABLE IF NOT EXISTS query_feedback (
         id SERIAL PRIMARY KEY,
@@ -70,6 +74,7 @@ export async function ensureTables(): Promise<void> {
 
       CREATE TABLE IF NOT EXISTS user_schemas (
         id SERIAL PRIMARY KEY,
+        user_id VARCHAR(255),
         name VARCHAR(255) NOT NULL,
         raw_content TEXT NOT NULL,
         parsed_ddl TEXT NOT NULL DEFAULT '',
@@ -77,6 +82,17 @@ export async function ensureTables(): Promise<void> {
         file_name VARCHAR(255),
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      ALTER TABLE user_schemas ADD COLUMN IF NOT EXISTS user_id VARCHAR(255);
+
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(255),
+        role VARCHAR(20) NOT NULL DEFAULT 'user',
+        content TEXT NOT NULL,
+        query_id INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
       );
     `);
   } finally {
