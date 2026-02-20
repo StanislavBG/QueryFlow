@@ -7,9 +7,7 @@ import {
   sqlQueries,
   queryFeedback,
   agentSettings,
-  formattingRules,
   updateAgentSettingsSchema,
-  updateFormattingRuleSchema,
 } from './schema';
 
 export const errorSchemas = {
@@ -142,25 +140,6 @@ export const api = {
       input: updateAgentSettingsSchema,
       responses: {
         200: z.custom<typeof agentSettings.$inferSelect>(),
-        404: errorSchemas.notFound,
-      },
-    },
-  },
-
-  formattingRules: {
-    list: {
-      method: 'GET' as const,
-      path: '/api/formatting-rules' as const,
-      responses: {
-        200: z.array(z.custom<typeof formattingRules.$inferSelect>()),
-      },
-    },
-    update: {
-      method: 'PATCH' as const,
-      path: '/api/formatting-rules/:name' as const,
-      input: updateFormattingRuleSchema,
-      responses: {
-        200: z.custom<typeof formattingRules.$inferSelect>(),
         404: errorSchemas.notFound,
       },
     },

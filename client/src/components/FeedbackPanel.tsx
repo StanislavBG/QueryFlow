@@ -18,6 +18,7 @@ import {
   Palette,
   PlayCircle,
   BookOpen,
+  AlignLeft,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import type { QueryFeedbackRow } from "@shared/schema";
@@ -58,6 +59,7 @@ const agentConfig = {
   optimization: { icon: Zap, label: "Performance", color: "text-muted-foreground" },
   error: { icon: Bug, label: "Correctness", color: "text-muted-foreground" },
   style: { icon: Palette, label: "Style", color: "text-muted-foreground" },
+  formatting: { icon: AlignLeft, label: "Formatting", color: "text-muted-foreground" },
   documentation: { icon: BookOpen, label: "Documentation", color: "text-primary" },
 };
 

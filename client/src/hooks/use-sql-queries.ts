@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
-import type { SqlQuery, InsertSqlQuery, UpdateSqlQuery, QueryFeedbackRow, AgentSettings, FormattingRule, UserSchema } from "@shared/schema";
+import type { SqlQuery, InsertSqlQuery, UpdateSqlQuery, QueryFeedbackRow, AgentSettings, UserSchema } from "@shared/schema";
 
 // ─── SQL Queries ─────────────────────────────────────────────────────
 
@@ -172,37 +172,6 @@ export function useUpdateAgentSettings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agent-settings"] });
-    },
-  });
-}
-
-// ─── Formatting Rules ────────────────────────────────────────────────
-
-export function useFormattingRules() {
-  return useQuery<FormattingRule[]>({
-    queryKey: ["formatting-rules"],
-    queryFn: async () => {
-      const res = await fetch(api.formattingRules.list.path);
-      if (!res.ok) throw new Error("Failed to fetch formatting rules");
-      return res.json();
-    },
-  });
-}
-
-export function useUpdateFormattingRule() {
-  const queryClient = useQueryClient();
-  return useMutation<FormattingRule, Error, { name: string; data: { enabled?: boolean; value?: string } }>({
-    mutationFn: async ({ name, data }) => {
-      const res = await fetch(buildUrl(api.formattingRules.update.path, { name }), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error("Failed to update formatting rule");
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["formatting-rules"] });
     },
   });
 }

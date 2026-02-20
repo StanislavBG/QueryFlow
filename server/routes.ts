@@ -4,9 +4,40 @@ import { clerkMiddleware, getAuth } from "@clerk/express";
 import { storage } from "./storage";
 import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
-import { runAgents, AGENT_DESCRIPTIONS, type AgentType } from "./agents";
 import { formatSQL } from "./formatter";
 import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmAskQuestion, llmParseSchema } from "./llm";
+
+// All available analysis categories
+const ALL_CATEGORIES = ["structure", "optimization", "error", "style", "formatting", "documentation"] as const;
+type AnalysisCategory = typeof ALL_CATEGORIES[number];
+
+// Descriptions used for agent settings seeding and UI
+export const CATEGORY_DESCRIPTIONS: Record<AnalysisCategory, { name: string; description: string }> = {
+  structure: {
+    name: "Structure",
+    description: "Query structure, nesting depth, complexity, and readability.",
+  },
+  optimization: {
+    name: "Performance",
+    description: "Performance patterns, index usage, and query efficiency.",
+  },
+  error: {
+    name: "Correctness",
+    description: "Potential SQL bugs, typos, and syntax issues.",
+  },
+  style: {
+    name: "Style",
+    description: "Keyword casing, naming conventions, and coding consistency.",
+  },
+  formatting: {
+    name: "Formatting",
+    description: "Whitespace, line breaks, alignment, and visual layout.",
+  },
+  documentation: {
+    name: "Documentation",
+    description: "Comments, query purpose clarity, and team maintainability.",
+  },
+};
 
 export async function registerRoutes(
   httpServer: Server,
@@ -140,52 +171,71 @@ export async function registerRoutes(
       return res.status(404).json({ message: "Query not found" });
     }
 
-    // Get enabled agents from settings
-    const allSettings = await storage.getAgentSettings();
-    const enabledAgents = allSettings.length > 0
-      ? allSettings
-          .filter(s => s.enabled)
-          .map(s => s.agentType as AgentType)
-      : ["structure", "optimization", "error", "style"] as AgentType[];
+    if (!query.content.trim()) {
+      return res.json([]);
+    }
+
+    if (!isLLMConfigured()) {
+      return res.status(503).json({
+        message: "LLM not configured. Set ANTHROPIC_API_KEY to enable analysis.",
+      });
+    }
 
     const dialect = req.body.dialect || "Standard SQL";
 
-    // Clear previous feedback for this query
+    // Determine which categories are enabled
+    const allSettings = await storage.getAgentSettings();
+    const enabledCategories = allSettings.length > 0
+      ? allSettings.filter(s => s.enabled).map(s => s.agentType)
+      : [...ALL_CATEGORIES];
+
+    // Gather schema context
+    const schemas = await storage.getUserSchemas();
+    const schemaContext = schemas.length > 0
+      ? schemas.map(s => s.parsedDdl).filter(Boolean).join("\n\n")
+      : undefined;
+
+    // Gather document context
+    const docs = await storage.getDocuments();
+    const docContext = docs.length > 0
+      ? docs.map(d => d.content).join("\n\n---\n\n")
+      : undefined;
+
+    // Gather previously accepted feedback as preference signal
+    const existingFeedback = await storage.getFeedbackByQueryId(queryId);
+    const acceptedFeedback = existingFeedback
+      .filter(f => f.isResolved)
+      .map(f => ({ title: f.title, suggestion: f.suggestion }));
+
+    // Clear previous feedback
     await storage.deleteFeedbackByQueryId(queryId);
 
-    // Run heuristic agents
-    const feedbackItems = runAgents(queryId, query.content, enabledAgents);
+    try {
+      const llmResults = await llmAnalyzeQuery(query.content, {
+        dialect,
+        schemas: schemaContext,
+        documents: docContext,
+        acceptedFeedback: acceptedFeedback.length > 0 ? acceptedFeedback : undefined,
+        enabledCategories,
+      });
 
-    // Run LLM documentation analysis in parallel if configured
-    let llmFeedbackItems: typeof feedbackItems = [];
-    if (isLLMConfigured()) {
-      try {
-        const schemas = await storage.getUserSchemas();
-        const schemaContext = schemas.length > 0
-          ? schemas.map(s => s.parsedDdl).filter(Boolean).join("\n\n")
-          : undefined;
+      const feedbackItems = llmResults.map(r => ({
+        queryId,
+        agentType: r.agentType,
+        severity: r.severity,
+        title: r.title,
+        message: r.message,
+        suggestion: r.suggestion ?? null,
+        lineNumber: r.lineNumber ?? null,
+        isResolved: false,
+      }));
 
-        const docResults = await llmAnalyzeQuery(query.content, dialect, schemaContext);
-        llmFeedbackItems = docResults.map(r => ({
-          queryId,
-          agentType: r.agentType || "documentation",
-          severity: r.severity || "info",
-          title: r.title,
-          message: r.message,
-          suggestion: r.suggestion ?? null,
-          lineNumber: r.lineNumber ?? null,
-          isResolved: false,
-        }));
-      } catch (err) {
-        console.error("LLM documentation analysis failed:", err);
-      }
+      const created = await storage.createFeedbackBatch(feedbackItems);
+      res.json(created);
+    } catch (err) {
+      console.error("LLM analysis failed:", err);
+      res.status(500).json({ message: "Analysis failed. Please try again." });
     }
-
-    // Store all feedback
-    const allFeedback = [...feedbackItems, ...llmFeedbackItems];
-    const created = await storage.createFeedbackBatch(allFeedback);
-
-    res.json(created);
   });
 
   app.patch("/api/feedback/:id/resolve", async (req, res) => {
@@ -255,33 +305,6 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Agent settings not found" });
       }
       res.json(settings);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({
-          message: err.errors[0].message,
-          field: err.errors[0].path.join('.'),
-        });
-      }
-      throw err;
-    }
-  });
-
-  // ─── Formatting Rules Routes ───────────────────────────────────────
-
-  app.get(api.formattingRules.list.path, async (req, res) => {
-    const rules = await storage.getFormattingRules();
-    res.json(rules);
-  });
-
-  app.patch("/api/formatting-rules/:name", async (req, res) => {
-    const { name } = req.params;
-    try {
-      const input = api.formattingRules.update.input.parse(req.body);
-      const rule = await storage.updateFormattingRule(name, input);
-      if (!rule) {
-        return res.status(404).json({ message: "Formatting rule not found" });
-      }
-      res.json(rule);
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({
@@ -489,33 +512,17 @@ export async function registerRoutes(
     }
   }).catch(console.error);
 
-  // Seed agent settings
+  // Seed agent settings for all analysis categories
   storage.getAgentSettings().then(async (settings) => {
-    if (settings.length === 0) {
-      const agentTypes: AgentType[] = ["structure", "optimization", "error", "style"];
-      for (const agentType of agentTypes) {
-        const desc = AGENT_DESCRIPTIONS[agentType];
+    const existingTypes = new Set(settings.map(s => s.agentType));
+    for (const category of ALL_CATEGORIES) {
+      if (!existingTypes.has(category)) {
         await storage.upsertAgentSettings({
-          agentType,
+          agentType: category,
           enabled: true,
-          priority: agentType === "error" ? 3 : agentType === "optimization" ? 2 : 1,
+          priority: category === "error" ? 3 : category === "optimization" ? 2 : 1,
           config: {},
         });
-      }
-    }
-  }).catch(console.error);
-
-  // Seed formatting rules
-  storage.getFormattingRules().then(async (rules) => {
-    if (rules.length === 0) {
-      const defaultRules = [
-        { name: "uppercaseKeywords", description: "Convert SQL keywords to UPPERCASE", enabled: true, value: "true" },
-        { name: "indentSize", description: "Number of spaces per indentation level", enabled: true, value: "2" },
-        { name: "commaPosition", description: "Position of commas: 'trailing' or 'leading'", enabled: true, value: "trailing" },
-        { name: "maxLineLength", description: "Maximum characters per line before wrapping", enabled: true, value: "120" },
-      ];
-      for (const rule of defaultRules) {
-        await storage.upsertFormattingRule(rule);
       }
     }
   }).catch(console.error);
