@@ -8,7 +8,7 @@ import type { SqlQuery } from "@shared/schema";
 
 interface QueryDocumentListProps {
   selectedId: number | null;
-  onSelect: (id: number) => void;
+  onSelect: (id: number | null) => void;
 }
 
 export function QueryDocumentList({ selectedId, onSelect }: QueryDocumentListProps) {
@@ -34,14 +34,12 @@ export function QueryDocumentList({ selectedId, onSelect }: QueryDocumentListPro
 
   const handleDelete = (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
+    if (selectedId === id) {
+      const remaining = queries?.filter(q => q.id !== id);
+      onSelect(remaining && remaining.length > 0 ? remaining[0].id : null);
+    }
     deleteMutation.mutate(id, {
       onSuccess: () => {
-        if (selectedId === id) {
-          const remaining = queries?.filter(q => q.id !== id);
-          if (remaining && remaining.length > 0) {
-            onSelect(remaining[0].id);
-          }
-        }
         toast({ title: "Query deleted" });
       },
     });

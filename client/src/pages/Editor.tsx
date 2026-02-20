@@ -126,7 +126,7 @@ export default function Editor() {
     }
   }, [selectedQuery?.id]);
 
-  const handleQuerySelect = useCallback((id: number) => {
+  const handleQuerySelect = useCallback((id: number | null) => {
     setSelectedQueryId(id);
     setCurrentContent("");
   }, []);
