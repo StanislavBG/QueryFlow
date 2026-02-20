@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { ensureTables } from "./db";
+import { initEncryption } from "./encryption";
 
 const app = express();
 const httpServer = createServer(app);
@@ -61,6 +62,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Initialize encryption before anything touches the database
+  initEncryption();
+
   // Ensure all database tables exist before starting
   await ensureTables();
 
