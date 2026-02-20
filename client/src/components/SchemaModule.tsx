@@ -132,7 +132,15 @@ export function SchemaTreePanel() {
         createMutation.mutate(
           { name, rawContent: content, fileName: file.name },
           {
-            onSuccess: () => toast({ title: "Schema added", description: `"${name}" has been parsed.` }),
+            onSuccess: (schema) => {
+              const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+              const parseError = (schema as Record<string, unknown>).parseError as string | undefined;
+              if (tables.length > 0) {
+                toast({ title: "Schema added", description: `"${name}" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
+              } else {
+                toast({ title: "Schema added — no tables detected", description: parseError || `"${name}" was saved but no tables could be parsed.`, variant: "destructive" });
+              }
+            },
             onError: (err) => toast({ title: "Error", description: err.message, variant: "destructive" }),
           }
         );
@@ -304,10 +312,11 @@ export function SchemaUpload() {
         {
           onSuccess: (schema) => {
             const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+            const parseError = (schema as Record<string, unknown>).parseError as string | undefined;
             if (tables.length > 0) {
               toast({ title: "Schema added", description: `"${name}" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
             } else {
-              toast({ title: "Schema added — no tables detected", description: `"${name}" was saved but no tables could be parsed. Check the file format.`, variant: "destructive" });
+              toast({ title: "Schema added — no tables detected", description: parseError || `"${name}" was saved but no tables could be parsed.`, variant: "destructive" });
             }
             setSchemaName("");
             setSchemaDescription("");
@@ -350,10 +359,11 @@ export function SchemaUpload() {
         {
           onSuccess: (schema) => {
             const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+            const parseError = (schema as Record<string, unknown>).parseError as string | undefined;
             if (tables.length > 0) {
               toast({ title: "Schema added", description: `"${name}" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
             } else {
-              toast({ title: "Schema added — no tables detected", description: `"${name}" was saved but no tables could be parsed. Check the content format.`, variant: "destructive" });
+              toast({ title: "Schema added — no tables detected", description: parseError || `"${name}" was saved but no tables could be parsed.`, variant: "destructive" });
             }
             setSchemaName("");
             setSchemaDescription("");
