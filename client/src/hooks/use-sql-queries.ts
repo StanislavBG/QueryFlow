@@ -73,8 +73,10 @@ export function useDeleteSqlQuery() {
       });
       if (!res.ok) throw new Error("Failed to delete SQL query");
     },
-    onSuccess: () => {
+    onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: ["sql-queries"] });
+      queryClient.removeQueries({ queryKey: ["sql-queries", id] });
+      queryClient.removeQueries({ queryKey: ["feedback", id] });
     },
   });
 }
