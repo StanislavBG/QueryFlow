@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback } from "react";
-import { useUserSchemas, useCreateUserSchema, useDeleteUserSchema } from "@/hooks/use-sql-queries";
+import { useUserSchemas, useCreateUserSchema, useDeleteUserSchema, useUpdateUserSchema } from "@/hooks/use-sql-queries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -13,6 +14,10 @@ import {
   ChevronRight,
   FileText,
   Database,
+  Pencil,
+  Check,
+  X,
+  Plus,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { UserSchema } from "@shared/schema";
@@ -25,7 +30,68 @@ function SchemaCard({
   onDelete: (id: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(schema.name);
+  const [editDdl, setEditDdl] = useState(schema.parsedDdl || "");
+  const [editingTableIndex, setEditingTableIndex] = useState<number | null>(null);
+  const [newColumnName, setNewColumnName] = useState("");
+  const updateMutation = useUpdateUserSchema();
+  const { toast } = useToast();
   const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+
+  const handleSaveEdit = () => {
+    updateMutation.mutate(
+      { id: schema.id, data: { name: editName, rawContent: editDdl } },
+      {
+        onSuccess: () => {
+          setIsEditing(false);
+          toast({ title: "Schema updated" });
+        },
+        onError: (err) => {
+          toast({ title: "Error", description: err.message, variant: "destructive" });
+        },
+      }
+    );
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditName(schema.name);
+    setEditDdl(schema.parsedDdl || "");
+  };
+
+  const handleRemoveColumn = (tableIdx: number, colIdx: number) => {
+    const newTables = tables.map((t, i) => {
+      if (i !== tableIdx) return t;
+      return { ...t, columns: t.columns.filter((_, j) => j !== colIdx) };
+    });
+    updateMutation.mutate(
+      { id: schema.id, data: { tables: newTables } },
+      {
+        onSuccess: () => toast({ title: "Column removed" }),
+        onError: (err) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+      }
+    );
+  };
+
+  const handleAddColumn = (tableIdx: number) => {
+    if (!newColumnName.trim()) return;
+    const newTables = tables.map((t, i) => {
+      if (i !== tableIdx) return t;
+      return { ...t, columns: [...t.columns, newColumnName.trim()] };
+    });
+    updateMutation.mutate(
+      { id: schema.id, data: { tables: newTables } },
+      {
+        onSuccess: () => {
+          setNewColumnName("");
+          setEditingTableIndex(null);
+          toast({ title: "Column added" });
+        },
+        onError: (err) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+      }
+    );
+  };
 
   return (
     <div className="rounded-md border border-border bg-muted/30">
@@ -57,20 +123,60 @@ function SchemaCard({
             )}
           </div>
         </div>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(schema.id);
-          }}
-          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-destructive/20 rounded"
-        >
-          <Trash2 className="w-3 h-3 text-destructive" />
-        </button>
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsEditing(true);
+              setExpanded(true);
+            }}
+            className="p-1 hover:bg-primary/20 rounded"
+          >
+            <Pencil className="w-3 h-3 text-primary" />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(schema.id);
+            }}
+            className="p-1 hover:bg-destructive/20 rounded"
+          >
+            <Trash2 className="w-3 h-3 text-destructive" />
+          </button>
+        </div>
       </button>
 
       {expanded && (
         <div className="px-2.5 pb-2.5 space-y-2">
-          {/* Tables list */}
+          {/* Edit mode for name + DDL */}
+          {isEditing && (
+            <div className="space-y-2 border border-primary/30 rounded-md p-2 bg-primary/5">
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="h-7 text-xs"
+                placeholder="Schema name"
+              />
+              <Textarea
+                value={editDdl}
+                onChange={(e) => setEditDdl(e.target.value)}
+                className="text-[10px] font-mono min-h-[80px] max-h-[200px]"
+                placeholder="Paste or edit DDL..."
+              />
+              <div className="flex gap-1">
+                <Button size="sm" className="h-6 text-[10px]" onClick={handleSaveEdit} disabled={updateMutation.isPending}>
+                  {updateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Check className="w-3 h-3 mr-1" />}
+                  Save
+                </Button>
+                <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={handleCancelEdit}>
+                  <X className="w-3 h-3 mr-1" />
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Tables list with inline column editing */}
           {tables.length > 0 && (
             <div className="space-y-1.5">
               {tables.map((table, i) => (
@@ -78,18 +184,58 @@ function SchemaCard({
                   <p className="text-[10px] font-semibold text-primary mb-1">{table.name}</p>
                   <div className="flex flex-wrap gap-1">
                     {table.columns.map((col, j) => (
-                      <Badge key={j} variant="outline" className="text-[10px] h-4 font-mono">
+                      <Badge
+                        key={j}
+                        variant="outline"
+                        className="text-[10px] h-4 font-mono group/col cursor-default"
+                      >
                         {col}
+                        <button
+                          onClick={() => handleRemoveColumn(i, j)}
+                          className="ml-1 opacity-0 group-hover/col:opacity-100 transition-opacity"
+                          title="Remove column"
+                        >
+                          <X className="w-2.5 h-2.5 text-destructive" />
+                        </button>
                       </Badge>
                     ))}
+                    {/* Add column inline */}
+                    {editingTableIndex === i ? (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          value={newColumnName}
+                          onChange={(e) => setNewColumnName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleAddColumn(i);
+                            if (e.key === "Escape") { setEditingTableIndex(null); setNewColumnName(""); }
+                          }}
+                          className="h-4 w-20 text-[10px] font-mono px-1"
+                          placeholder="column"
+                          autoFocus
+                        />
+                        <button onClick={() => handleAddColumn(i)} className="text-primary">
+                          <Check className="w-3 h-3" />
+                        </button>
+                        <button onClick={() => { setEditingTableIndex(null); setNewColumnName(""); }}>
+                          <X className="w-3 h-3 text-muted-foreground" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setEditingTableIndex(i)}
+                        className="flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                      >
+                        <Plus className="w-2.5 h-2.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           )}
 
-          {/* DDL preview */}
-          {schema.parsedDdl && (
+          {/* DDL preview (read-only when not editing) */}
+          {!isEditing && schema.parsedDdl && (
             <div className="rounded bg-background border border-border p-2 max-h-[150px] overflow-auto">
               <pre className="text-[10px] font-mono text-muted-foreground whitespace-pre-wrap">
                 {schema.parsedDdl.substring(0, 1000)}{schema.parsedDdl.length > 1000 ? "..." : ""}

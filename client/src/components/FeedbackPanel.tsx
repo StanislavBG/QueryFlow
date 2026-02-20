@@ -19,7 +19,7 @@ import {
   PlayCircle,
   BookOpen,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import type { QueryFeedbackRow } from "@shared/schema";
 
 const severityConfig = {
@@ -64,9 +64,13 @@ const agentConfig = {
 function FeedbackCard({
   feedback,
   queryId,
+  isHighlighted,
+  onHover,
 }: {
   feedback: QueryFeedbackRow;
   queryId: number;
+  isHighlighted?: boolean;
+  onHover?: (feedbackId: number | null) => void;
 }) {
   const [expanded, setExpanded] = useState(!feedback.isResolved);
   const resolveMutation = useResolveFeedback();
@@ -79,7 +83,9 @@ function FeedbackCard({
     <div
       className={`rounded-md border ${severity.border} ${severity.bg} ${
         feedback.isResolved ? "opacity-50" : ""
-      }`}
+      } ${isHighlighted ? "ring-2 ring-primary ring-offset-1 ring-offset-background" : ""} transition-all`}
+      onMouseEnter={() => onHover?.(feedback.id)}
+      onMouseLeave={() => onHover?.(null)}
     >
       <button
         onClick={() => setExpanded(!expanded)}
@@ -101,7 +107,9 @@ function FeedbackCard({
               {agent.label}
             </Badge>
             {feedback.lineNumber && (
-              <span className="text-[10px] text-muted-foreground">Line {feedback.lineNumber}</span>
+              <span className={`text-[10px] ${isHighlighted ? "text-primary font-semibold" : "text-muted-foreground"}`}>
+                Line {feedback.lineNumber}
+              </span>
             )}
           </div>
         </div>
@@ -150,9 +158,11 @@ function FeedbackCard({
 interface FeedbackPanelProps {
   queryId: number | null;
   dialect?: string;
+  hoveredLine?: number | null;
+  onFeedbackHover?: (lineNumbers: Set<number>) => void;
 }
 
-export function FeedbackPanel({ queryId, dialect }: FeedbackPanelProps) {
+export function FeedbackPanel({ queryId, dialect, hoveredLine, onFeedbackHover }: FeedbackPanelProps) {
   const { data: feedback, isLoading: isFeedbackLoading } = useQueryFeedback(queryId);
   const analyzeMutation = useAnalyzeQuery();
   const [filter, setFilter] = useState<string | null>(null);
@@ -163,6 +173,20 @@ export function FeedbackPanel({ queryId, dialect }: FeedbackPanelProps) {
     }
   };
 
+  const handleFeedbackHover = useCallback((feedbackId: number | null) => {
+    if (!feedback || !onFeedbackHover) return;
+    if (feedbackId === null) {
+      onFeedbackHover(new Set());
+      return;
+    }
+    const item = feedback.find(f => f.id === feedbackId);
+    if (item?.lineNumber) {
+      onFeedbackHover(new Set([item.lineNumber]));
+    } else {
+      onFeedbackHover(new Set());
+    }
+  }, [feedback, onFeedbackHover]);
+
   const filteredFeedback = feedback?.filter((f) => {
     if (!filter) return true;
     return f.agentType === filter;
@@ -171,6 +195,16 @@ export function FeedbackPanel({ queryId, dialect }: FeedbackPanelProps) {
   const unresolvedCount = feedback?.filter(f => !f.isResolved).length || 0;
   const errorCount = feedback?.filter(f => f.severity === "error" && !f.isResolved).length || 0;
   const warningCount = feedback?.filter(f => f.severity === "warning" && !f.isResolved).length || 0;
+
+  // Determine which feedback items are highlighted (when hovering a line in the editor)
+  const highlightedFeedbackIds = new Set<number>();
+  if (hoveredLine && feedback) {
+    for (const f of feedback) {
+      if (f.lineNumber === hoveredLine) {
+        highlightedFeedbackIds.add(f.id);
+      }
+    }
+  }
 
   if (!queryId) {
     return (
@@ -274,7 +308,13 @@ export function FeedbackPanel({ queryId, dialect }: FeedbackPanelProps) {
                 return (severityOrder[a.severity] || 2) - (severityOrder[b.severity] || 2);
               })
               .map((item) => (
-                <FeedbackCard key={item.id} feedback={item} queryId={queryId} />
+                <FeedbackCard
+                  key={item.id}
+                  feedback={item}
+                  queryId={queryId}
+                  isHighlighted={highlightedFeedbackIds.has(item.id)}
+                  onHover={handleFeedbackHover}
+                />
               ))
           )}
         </div>
