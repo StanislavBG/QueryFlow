@@ -199,9 +199,12 @@ export function SchemaTreePanel() {
               return (
                 <div key={schema.id} className="mb-0.5">
                   {/* Schema node */}
-                  <button
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => toggleSchema(schema.id)}
-                    className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded text-left hover:bg-accent/50 group"
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleSchema(schema.id); }}
+                    className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded text-left hover:bg-accent/50 group cursor-pointer"
                   >
                     {isExpanded ? (
                       <ChevronDown className="w-3 h-3 text-muted-foreground flex-shrink-0" />
@@ -217,7 +220,7 @@ export function SchemaTreePanel() {
                     >
                       <Trash2 className="w-2.5 h-2.5 text-destructive" />
                     </button>
-                  </button>
+                  </div>
 
                   {/* Tables under this schema */}
                   {isExpanded && tables.map((table, ti) => {

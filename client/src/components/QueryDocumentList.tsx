@@ -79,10 +79,13 @@ export function QueryDocumentList({ selectedId, onSelect }: QueryDocumentListPro
             queries.map((query: SqlQuery) => {
               const hasDraft = query.draftContent != null && query.draftContent !== query.content;
               return (
-                <button
+                <div
                   key={query.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => onSelect(query.id)}
-                  className={`w-full text-left px-3 py-2.5 rounded-md text-sm group ${
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(query.id); }}
+                  className={`w-full text-left px-3 py-2.5 rounded-md text-sm group cursor-pointer ${
                     selectedId === query.id
                       ? "bg-accent border border-border text-foreground"
                       : "hover:bg-accent/50 border border-transparent text-muted-foreground hover:text-foreground"
@@ -106,7 +109,7 @@ export function QueryDocumentList({ selectedId, onSelect }: QueryDocumentListPro
                   <p className="text-[10px] mt-1 opacity-60 pl-5.5">
                     {query.updatedAt ? format(new Date(query.updatedAt), "MMM d, HH:mm") : ""}
                   </p>
-                </button>
+                </div>
               );
             })
           )}
