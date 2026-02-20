@@ -14,10 +14,12 @@ import {
 } from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes } from "lucide-react";
+import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
+import { useCurrentUser } from "@/hooks/use-admin";
+import { useLocation } from "wouter";
 import {
   MODEL,
   detectSqlDialect,
@@ -101,6 +103,9 @@ export default function Editor() {
   const { data: schemas } = useUserSchemas();
   const createMutation = useCreateSqlQuery();
   const { dark, toggle: toggleTheme } = useTheme();
+  const { data: currentUser } = useCurrentUser();
+  const [, setLocation] = useLocation();
+  const isAdmin = currentUser?.authenticated && currentUser?.role === "admin";
 
   // Hover linking state between editor and feedback panel
   const [hoveredEditorLine, setHoveredEditorLine] = useState<number | null>(null);
@@ -261,6 +266,19 @@ export default function Editor() {
 
         {/* Right: theme + auth + settings */}
         <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" onClick={() => setLocation("/admin")} className="h-7 w-7 p-0">
+                  <Shield className="w-3.5 h-3.5 text-primary" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p className="text-xs">Admin Dashboard</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
+
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="sm" onClick={toggleTheme} className="h-7 w-7 p-0">
