@@ -32,3 +32,31 @@ No manual migration step — the Drizzle schema is used only for ORM types and q
 
 ### 5. No `drizzle-kit` in this project
 `drizzle-kit` was intentionally removed to prevent Replit's deployment provisioner from generating destructive migrations (DROP TABLE, DROP COLUMN). Do **not** re-add it. All schema management goes through `ensureTables()` in `server/db.ts`.
+
+## Testing Requirements
+
+### Schema parser changes
+Whenever `server/schema-parser.ts` or the LLM schema-parsing prompt in `server/llm.ts` is modified, **always** verify parsing works against the test fixtures below before committing. Run the server locally and POST each fixture to `/api/schemas` to confirm tables are detected.
+
+**Test fixtures** (plain-text MySQL DESCRIBE output — must parse correctly):
+
+```
+DESCRIBE gsm.temp_lan_wlan_cbom;
+TYPE	varchar(4)	YES	MUL
+Date_Uploaded	date	NO
+ITEM_IN_BOM	varchar(10)	NO	PRI
+FYFQ	varchar(6)	NO	PRI
+Partner	varchar(15)	NO	PRI
+Product_SKU	varchar(20)	NO	PRI
+
+DESCRIBE gsm.lan_wlan_actuals;
+Date_Uploaded	date	YES
+TYPE	varchar(4)	YES	MUL
+Partner	varchar(15)	NO	PRI
+FYFQ	varchar(6)	NO	PRI
+Product_SKU	varchar(20)	NO	PRI
+Product_Used_In	varchar(20)	NO	PRI
+Qty_Ship	decimal(10,2)	YES
+```
+
+Expected result: 2 tables (`temp_lan_wlan_cbom`, `lan_wlan_actuals`) with correct columns and primary keys.
