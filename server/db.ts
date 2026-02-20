@@ -67,6 +67,17 @@ export async function ensureTables(): Promise<void> {
         value TEXT NOT NULL DEFAULT '',
         updated_at TIMESTAMP DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS user_schemas (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        raw_content TEXT NOT NULL,
+        parsed_ddl TEXT NOT NULL DEFAULT '',
+        tables JSONB DEFAULT '[]',
+        file_name VARCHAR(255),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
     `);
   } finally {
     client.release();

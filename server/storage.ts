@@ -6,6 +6,7 @@ import {
   queryFeedback,
   agentSettings,
   formattingRules,
+  userSchemas,
   type CreateDocumentRequest,
   type DocumentResponse,
   type InsertSqlQuery,
@@ -19,6 +20,9 @@ import {
   type FormattingRule,
   type InsertFormattingRule,
   type UpdateFormattingRule,
+  type UserSchema,
+  type InsertUserSchema,
+  type UpdateUserSchema,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -51,6 +55,13 @@ export interface IStorage {
   getFormattingRule(name: string): Promise<FormattingRule | undefined>;
   upsertFormattingRule(rule: InsertFormattingRule): Promise<FormattingRule>;
   updateFormattingRule(name: string, update: UpdateFormattingRule): Promise<FormattingRule | undefined>;
+
+  // User Schemas
+  getUserSchemas(): Promise<UserSchema[]>;
+  getUserSchema(id: number): Promise<UserSchema | undefined>;
+  createUserSchema(schema: InsertUserSchema): Promise<UserSchema>;
+  updateUserSchema(id: number, schema: UpdateUserSchema): Promise<UserSchema | undefined>;
+  deleteUserSchema(id: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -193,6 +204,34 @@ export class DatabaseStorage implements IStorage {
       .where(eq(formattingRules.name, name))
       .returning();
     return updated;
+  }
+  // User Schemas
+  async getUserSchemas(): Promise<UserSchema[]> {
+    return await db.select().from(userSchemas).orderBy(desc(userSchemas.updatedAt));
+  }
+
+  async getUserSchema(id: number): Promise<UserSchema | undefined> {
+    const [schema] = await db.select().from(userSchemas).where(eq(userSchemas.id, id));
+    return schema;
+  }
+
+  async createUserSchema(schema: InsertUserSchema): Promise<UserSchema> {
+    const [created] = await db.insert(userSchemas).values(schema).returning();
+    return created;
+  }
+
+  async updateUserSchema(id: number, schema: UpdateUserSchema): Promise<UserSchema | undefined> {
+    const [updated] = await db
+      .update(userSchemas)
+      .set({ ...schema, updatedAt: new Date() })
+      .where(eq(userSchemas.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteUserSchema(id: number): Promise<boolean> {
+    const result = await db.delete(userSchemas).where(eq(userSchemas.id, id)).returning();
+    return result.length > 0;
   }
 }
 

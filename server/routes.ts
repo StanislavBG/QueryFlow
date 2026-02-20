@@ -6,6 +6,7 @@ import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
 import { runAgents, AGENT_DESCRIPTIONS, type AgentType } from "./agents";
 import { formatSQL } from "./formatter";
+import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmAskQuestion, llmParseSchema } from "./llm";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -139,14 +140,42 @@ export async function registerRoutes(
           .map(s => s.agentType as AgentType)
       : ["structure", "optimization", "error", "style"] as AgentType[];
 
+    const dialect = req.body.dialect || "Standard SQL";
+
     // Clear previous feedback for this query
     await storage.deleteFeedbackByQueryId(queryId);
 
-    // Run agents
+    // Run heuristic agents
     const feedbackItems = runAgents(queryId, query.content, enabledAgents);
 
-    // Store feedback
-    const created = await storage.createFeedbackBatch(feedbackItems);
+    // Run LLM documentation analysis in parallel if configured
+    let llmFeedbackItems: typeof feedbackItems = [];
+    if (isLLMConfigured()) {
+      try {
+        const schemas = await storage.getUserSchemas();
+        const schemaContext = schemas.length > 0
+          ? schemas.map(s => s.parsedDdl).filter(Boolean).join("\n\n")
+          : undefined;
+
+        const docResults = await llmAnalyzeQuery(query.content, dialect, schemaContext);
+        llmFeedbackItems = docResults.map(r => ({
+          queryId,
+          agentType: r.agentType || "documentation",
+          severity: r.severity || "info",
+          title: r.title,
+          message: r.message,
+          suggestion: r.suggestion ?? null,
+          lineNumber: r.lineNumber ?? null,
+          isResolved: false,
+        }));
+      } catch (err) {
+        console.error("LLM documentation analysis failed:", err);
+      }
+    }
+
+    // Store all feedback
+    const allFeedback = [...feedbackItems, ...llmFeedbackItems];
+    const created = await storage.createFeedbackBatch(allFeedback);
 
     res.json(created);
   });
@@ -163,13 +192,27 @@ export async function registerRoutes(
     res.json(feedback);
   });
 
-  // ─── Format Route ──────────────────────────────────────────────────
+  // ─── Format Route (LLM-powered with local fallback) ────────────────
 
   app.post(api.format.formatQuery.path, async (req, res) => {
     try {
       const input = api.format.formatQuery.input.parse(req.body);
-      const formatted = formatSQL(input.sql);
-      res.json({ formatted });
+      const dialect = req.body.dialect || "Standard SQL";
+
+      if (isLLMConfigured()) {
+        // Gather schemas for context
+        const schemas = await storage.getUserSchemas();
+        const schemaContext = schemas.length > 0
+          ? schemas.map(s => s.parsedDdl).filter(Boolean).join("\n\n")
+          : undefined;
+
+        const result = await llmFormatQuery(input.sql, dialect, schemaContext);
+        res.json({ formatted: result.formatted, notes: result.notes, llm: true });
+      } else {
+        // Fallback to local formatter
+        const formatted = formatSQL(input.sql);
+        res.json({ formatted, notes: "", llm: false });
+      }
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({
@@ -177,7 +220,14 @@ export async function registerRoutes(
           field: err.errors[0].path.join('.'),
         });
       }
-      throw err;
+      // If LLM fails, fallback to local formatter
+      try {
+        const input = z.object({ sql: z.string() }).parse(req.body);
+        const formatted = formatSQL(input.sql);
+        res.json({ formatted, notes: "LLM unavailable, used local formatter.", llm: false });
+      } catch {
+        throw err;
+      }
     }
   });
 
@@ -233,6 +283,107 @@ export async function registerRoutes(
       }
       throw err;
     }
+  });
+
+  // ─── Ask Route (LLM Q&A) ─────────────────────────────────────────
+
+  app.post("/api/ask", async (req, res) => {
+    try {
+      const input = z.object({
+        question: z.string().min(1),
+        queryContent: z.string().optional(),
+        dialect: z.string().optional(),
+      }).parse(req.body);
+
+      if (!isLLMConfigured()) {
+        return res.status(503).json({
+          message: "LLM not configured. Set ANTHROPIC_API_KEY in your environment.",
+        });
+      }
+
+      // Gather schema context
+      const schemas = await storage.getUserSchemas();
+      const schemaContext = schemas.length > 0
+        ? schemas.map(s => s.parsedDdl).filter(Boolean).join("\n\n")
+        : undefined;
+
+      const answer = await llmAskQuestion(
+        input.question,
+        input.queryContent,
+        schemaContext,
+        input.dialect
+      );
+
+      res.json({ answer });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error("Ask endpoint error:", err);
+      res.status(500).json({ message: "Failed to process question." });
+    }
+  });
+
+  // ─── User Schema Routes ─────────────────────────────────────────────
+
+  app.get("/api/schemas", async (_req, res) => {
+    const schemas = await storage.getUserSchemas();
+    res.json(schemas);
+  });
+
+  app.get("/api/schemas/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid schema ID" });
+    const schema = await storage.getUserSchema(id);
+    if (!schema) return res.status(404).json({ message: "Schema not found" });
+    res.json(schema);
+  });
+
+  app.post("/api/schemas", async (req, res) => {
+    try {
+      const input = z.object({
+        name: z.string().min(1),
+        rawContent: z.string().min(1),
+        fileName: z.string().optional(),
+      }).parse(req.body);
+
+      let parsedDdl = input.rawContent;
+      let tables: Array<{ name: string; columns: string[] }> = [];
+
+      // Use LLM to parse raw content into structured schema if available
+      if (isLLMConfigured()) {
+        try {
+          const result = await llmParseSchema(input.rawContent, input.fileName || "schema.sql");
+          parsedDdl = result.parsed;
+          tables = result.tables;
+        } catch (err) {
+          console.error("LLM schema parsing failed:", err);
+        }
+      }
+
+      const schema = await storage.createUserSchema({
+        name: input.name,
+        rawContent: input.rawContent,
+        parsedDdl,
+        tables,
+        fileName: input.fileName ?? null,
+      });
+
+      res.status(201).json(schema);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      throw err;
+    }
+  });
+
+  app.delete("/api/schemas/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid schema ID" });
+    const deleted = await storage.deleteUserSchema(id);
+    if (!deleted) return res.status(404).json({ message: "Schema not found" });
+    res.json({ message: "Schema deleted" });
   });
 
   // ─── Seed Data ─────────────────────────────────────────────────────

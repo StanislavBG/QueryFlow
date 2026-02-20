@@ -4,6 +4,8 @@ import { QueryDocumentList } from "@/components/QueryDocumentList";
 import { SqlEditor } from "@/components/SqlEditor";
 import { FeedbackPanel } from "@/components/FeedbackPanel";
 import { SettingsDialog } from "@/components/SettingsDialog";
+import { AskModule } from "@/components/AskModule";
+import { SchemaModule } from "@/components/SchemaModule";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -18,7 +20,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Cpu, Database, Sun, Moon } from "lucide-react";
+import { FileCode2, Loader2, Cpu, Database, Sun, Moon, MessageSquare, Table2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
@@ -79,6 +81,7 @@ export default function Editor() {
   const dialectMeta = DIALECT_META[detectedDialect];
 
   const [autoCreating, setAutoCreating] = useState(false);
+  const [leftTab, setLeftTab] = useState<"queries" | "ask" | "schemas">("queries");
 
   // Auto-select first query if none selected
   useEffect(() => {
@@ -234,13 +237,79 @@ export default function Editor() {
       {/* Main content */}
       <div className="flex-1 overflow-hidden">
         <ResizablePanelGroup direction="horizontal" className="h-full">
-          {/* Left sidebar */}
-          <ResizablePanel defaultSize={18} minSize={14} maxSize={30}>
-            <div className="h-full border-r border-border bg-card">
-              <QueryDocumentList
-                selectedId={selectedQueryId}
-                onSelect={handleQuerySelect}
-              />
+          {/* Left sidebar with tabs */}
+          <ResizablePanel defaultSize={20} minSize={16} maxSize={32}>
+            <div className="h-full border-r border-border bg-card flex flex-col">
+              {/* Tab bar */}
+              <div className="flex border-b border-border flex-shrink-0">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => setLeftTab("queries")}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[10px] font-medium border-b-2 transition-colors ${
+                        leftTab === "queries"
+                          ? "border-primary text-primary"
+                          : "border-transparent text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <FileCode2 className="w-3.5 h-3.5" />
+                      Queries
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom"><p className="text-xs">Manage SQL queries</p></TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => setLeftTab("ask")}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[10px] font-medium border-b-2 transition-colors ${
+                        leftTab === "ask"
+                          ? "border-primary text-primary"
+                          : "border-transparent text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      Ask
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom"><p className="text-xs">Ask questions about your SQL</p></TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => setLeftTab("schemas")}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[10px] font-medium border-b-2 transition-colors ${
+                        leftTab === "schemas"
+                          ? "border-primary text-primary"
+                          : "border-transparent text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <Table2 className="w-3.5 h-3.5" />
+                      Schemas
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom"><p className="text-xs">Manage schema definitions for validation</p></TooltipContent>
+                </Tooltip>
+              </div>
+
+              {/* Tab content */}
+              <div className="flex-1 overflow-hidden">
+                {leftTab === "queries" && (
+                  <QueryDocumentList
+                    selectedId={selectedQueryId}
+                    onSelect={handleQuerySelect}
+                  />
+                )}
+                {leftTab === "ask" && (
+                  <AskModule
+                    queryContent={currentContent}
+                    dialect={detectedDialect}
+                  />
+                )}
+                {leftTab === "schemas" && (
+                  <SchemaModule />
+                )}
+              </div>
             </div>
           </ResizablePanel>
 
@@ -259,6 +328,7 @@ export default function Editor() {
                   onContentChange={handleContentChange}
                   maxChars={selectedModel.maxQueryChars}
                   modelName={selectedModel.name}
+                  dialect={detectedDialect}
                 />
               ) : (
                 <div className="flex items-center justify-center h-full">
@@ -273,7 +343,7 @@ export default function Editor() {
           {/* Right panel - Feedback */}
           <ResizablePanel defaultSize={30} minSize={20} maxSize={45}>
             <div className="h-full border-l border-border bg-card">
-              <FeedbackPanel queryId={selectedQueryId} />
+              <FeedbackPanel queryId={selectedQueryId} dialect={detectedDialect} />
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>

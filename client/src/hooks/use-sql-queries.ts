@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
-import type { SqlQuery, InsertSqlQuery, UpdateSqlQuery, QueryFeedbackRow, AgentSettings, FormattingRule } from "@shared/schema";
+import type { SqlQuery, InsertSqlQuery, UpdateSqlQuery, QueryFeedbackRow, AgentSettings, FormattingRule, UserSchema } from "@shared/schema";
 
 // ─── SQL Queries ─────────────────────────────────────────────────────
 
@@ -95,15 +95,17 @@ export function useQueryFeedback(queryId: number | null) {
 
 export function useAnalyzeQuery() {
   const queryClient = useQueryClient();
-  return useMutation<QueryFeedbackRow[], Error, number>({
-    mutationFn: async (queryId) => {
+  return useMutation<QueryFeedbackRow[], Error, { queryId: number; dialect?: string }>({
+    mutationFn: async ({ queryId, dialect }) => {
       const res = await fetch(buildUrl(api.feedback.analyze.path, { id: queryId }), {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dialect }),
       });
       if (!res.ok) throw new Error("Failed to analyze query");
       return res.json();
     },
-    onSuccess: (_, queryId) => {
+    onSuccess: (_, { queryId }) => {
       queryClient.invalidateQueries({ queryKey: ["feedback", queryId] });
     },
   });
@@ -128,12 +130,12 @@ export function useResolveFeedback() {
 // ─── Format ──────────────────────────────────────────────────────────
 
 export function useFormatQuery() {
-  return useMutation<{ formatted: string }, Error, string>({
-    mutationFn: async (sql) => {
+  return useMutation<{ formatted: string; notes?: string; llm?: boolean }, Error, { sql: string; dialect?: string }>({
+    mutationFn: async ({ sql, dialect }) => {
       const res = await fetch(api.format.formatQuery.path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql }),
+        body: JSON.stringify({ sql, dialect }),
       });
       if (!res.ok) throw new Error("Failed to format query");
       return res.json();
@@ -199,6 +201,69 @@ export function useUpdateFormattingRule() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["formatting-rules"] });
+    },
+  });
+}
+
+// ─── Ask (LLM Q&A) ──────────────────────────────────────────────────
+
+export function useAskQuestion() {
+  return useMutation<{ answer: string }, Error, { question: string; queryContent?: string; dialect?: string }>({
+    mutationFn: async (data) => {
+      const res = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Failed to ask question" }));
+        throw new Error(err.message);
+      }
+      return res.json();
+    },
+  });
+}
+
+// ─── User Schemas ────────────────────────────────────────────────────
+
+export function useUserSchemas() {
+  return useQuery<UserSchema[]>({
+    queryKey: ["schemas"],
+    queryFn: async () => {
+      const res = await fetch("/api/schemas");
+      if (!res.ok) throw new Error("Failed to fetch schemas");
+      return res.json();
+    },
+  });
+}
+
+export function useCreateUserSchema() {
+  const queryClient = useQueryClient();
+  return useMutation<UserSchema, Error, { name: string; rawContent: string; fileName?: string }>({
+    mutationFn: async (data) => {
+      const res = await fetch("/api/schemas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to create schema");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["schemas"] });
+    },
+  });
+}
+
+export function useDeleteUserSchema() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, number>({
+    mutationFn: async (id) => {
+      const res = await fetch(`/api/schemas/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete schema");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["schemas"] });
     },
   });
 }
