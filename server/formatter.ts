@@ -361,7 +361,7 @@ export function formatSQL(sql: string, options: Partial<FormatOptions> = {}): st
     }
 
     // Add space before token if needed
-    if (currentLine && !currentLine.endsWith("(") && !currentLine.endsWith(".") && token.type !== "dot") {
+    if (currentLine && !currentLine.endsWith("(") && !currentLine.endsWith(".")) {
       currentLine += " ";
     }
 
