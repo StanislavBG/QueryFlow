@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
-import type { SqlQuery, InsertSqlQuery, UpdateSqlQuery, QueryFeedbackRow, AgentSettings, UserSchema, ParsedTable } from "@shared/schema";
+import type { SqlQuery, InsertSqlQuery, UpdateSqlQuery, QueryFeedbackRow, AgentSettings, UserSchema, ParsedTable, SchemaVoiceContext } from "@shared/schema";
 
 // ─── SQL Queries ─────────────────────────────────────────────────────
 
@@ -97,12 +97,12 @@ export function useQueryFeedback(queryId: number | null) {
 
 export function useAnalyzeQuery() {
   const queryClient = useQueryClient();
-  return useMutation<QueryFeedbackRow[], Error, { queryId: number; dialect?: string }>({
-    mutationFn: async ({ queryId, dialect }) => {
+  return useMutation<QueryFeedbackRow[], Error, { queryId: number; dialect?: string; content?: string }>({
+    mutationFn: async ({ queryId, dialect, content }) => {
       const res = await fetch(buildUrl(api.feedback.analyze.path, { id: queryId }), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dialect }),
+        body: JSON.stringify({ dialect, content }),
       });
       if (!res.ok) throw new Error("Failed to analyze query");
       return res.json();
@@ -297,6 +297,73 @@ export function useDeleteUserSchema() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["schemas"] });
+    },
+  });
+}
+
+// ─── Schema Voice Context ───────────────────────────────────────────
+
+export function useSchemaVoiceContexts(schemaId: number | null) {
+  return useQuery<SchemaVoiceContext[]>({
+    queryKey: ["voice-context", schemaId],
+    queryFn: async () => {
+      const res = await fetch(`/api/schemas/${schemaId}/voice-context`);
+      if (!res.ok) throw new Error("Failed to fetch voice contexts");
+      return res.json();
+    },
+    enabled: schemaId !== null,
+  });
+}
+
+export function useUpsertSchemaVoiceContext() {
+  const queryClient = useQueryClient();
+  return useMutation<SchemaVoiceContext, Error, {
+    schemaId: number;
+    targetType: "schema" | "table" | "column";
+    targetTable?: string | null;
+    targetColumn?: string | null;
+    transcript: string;
+  }>({
+    mutationFn: async ({ schemaId, ...data }) => {
+      const res = await fetch(`/api/schemas/${schemaId}/voice-context`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to save voice context");
+      return res.json();
+    },
+    onSuccess: (_, { schemaId }) => {
+      queryClient.invalidateQueries({ queryKey: ["voice-context", schemaId] });
+    },
+  });
+}
+
+export function useDeleteSchemaVoiceContext() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, { schemaId: number; id: number }>({
+    mutationFn: async ({ schemaId, id }) => {
+      const res = await fetch(`/api/schemas/${schemaId}/voice-context/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to delete voice context");
+    },
+    onSuccess: (_, { schemaId }) => {
+      queryClient.invalidateQueries({ queryKey: ["voice-context", schemaId] });
+    },
+  });
+}
+
+export function useTranscribeAudio() {
+  return useMutation<{ transcript: string }, Error, { schemaId: number; audio: string }>({
+    mutationFn: async ({ schemaId, audio }) => {
+      const res = await fetch(`/api/schemas/${schemaId}/voice-context/transcribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audio }),
+      });
+      if (!res.ok) throw new Error("Failed to transcribe audio");
+      return res.json();
     },
   });
 }

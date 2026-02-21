@@ -109,6 +109,18 @@ export async function ensureTables(): Promise<void> {
         metadata JSONB DEFAULT '{}',
         created_at TIMESTAMP DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS schema_voice_context (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(255),
+        schema_id INTEGER NOT NULL,
+        target_type VARCHAR(20) NOT NULL,
+        target_table VARCHAR(255),
+        target_column VARCHAR(255),
+        transcript TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
     `);
   } finally {
     client.release();
