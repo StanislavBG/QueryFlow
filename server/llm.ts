@@ -425,7 +425,10 @@ export async function llmParseSchema(
 ): Promise<{ parsed: string; tables: ParsedTable[]; error?: string }> {
   const openai = getClient();
 
-  console.log("[schema-parser] Starting parse for:", fileName, "content length:", rawContent.length);
+  console.log("[schema-parse] ── STAGE 1: INPUT ──");
+  console.log("[schema-parse] fileName:", fileName, "| rawContent length:", rawContent.length);
+  console.log("[schema-parse] rawContent first 300 chars:", JSON.stringify(rawContent.slice(0, 300)));
+  console.log("[schema-parse] rawContent last  200 chars:", JSON.stringify(rawContent.slice(-200)));
 
   const response = await openai.chat.completions.create({
     model: MODEL,
@@ -470,18 +473,59 @@ ${rawContent}`,
 
   const text = extractText(response);
 
-  console.log("[schema-parser] LLM response length:", text.length, "preview:", text.slice(0, 500));
+  console.log("[schema-parse] ── STAGE 2: LLM RAW RESPONSE ──");
+  console.log("[schema-parse] response length:", text.length);
+  console.log("[schema-parse] response first 800 chars:", text.slice(0, 800));
+  if (text.length > 800) {
+    console.log("[schema-parse] response last  400 chars:", text.slice(-400));
+  }
 
+  console.log("[schema-parse] ── STAGE 3: JSON EXTRACTION ──");
   const result = extractJsonObject(text);
 
-  if (!result || !Array.isArray(result.tables)) {
-    const error = `LLM returned no parseable schema data. Response preview: ${text.slice(0, 300)}`;
-    console.error("[schema-parser]", error);
+  if (!result) {
+    const error = `extractJsonObject returned null — could not find valid JSON object in LLM response. Full response: ${text.slice(0, 500)}`;
+    console.error("[schema-parse] FAIL:", error);
     return { parsed: rawContent, tables: [], error };
   }
 
+  console.log("[schema-parse] extractJsonObject succeeded. Top-level keys:", Object.keys(result));
+  console.log("[schema-parse] result.tables type:", typeof result.tables, "| isArray:", Array.isArray(result.tables));
+  if (Array.isArray(result.tables)) {
+    console.log("[schema-parse] result.tables length:", (result.tables as unknown[]).length);
+    // Log first table entry in detail to see shape
+    if ((result.tables as unknown[]).length > 0) {
+      console.log("[schema-parse] result.tables[0] sample:", JSON.stringify((result.tables as unknown[])[0]).slice(0, 500));
+    }
+  } else {
+    console.error("[schema-parse] FAIL: result.tables is NOT an array! Value:", JSON.stringify(result.tables).slice(0, 300));
+    const error = `LLM returned JSON but 'tables' is ${typeof result.tables}, not an array. Keys: ${Object.keys(result).join(", ")}`;
+    return { parsed: rawContent, tables: [], error };
+  }
+
+  console.log("[schema-parse] result.ddl type:", typeof result.ddl, "| length:", typeof result.ddl === "string" ? result.ddl.length : "N/A");
+
+  console.log("[schema-parse] ── STAGE 4: TABLE VALIDATION ──");
+
+  // Log each raw table entry before filtering
+  const rawTables = result.tables as Array<Record<string, unknown>>;
+  for (let i = 0; i < rawTables.length; i++) {
+    const t = rawTables[i];
+    const nameOk = typeof t.name === "string" && (t.name as string).length > 0;
+    const colsOk = Array.isArray(t.columns);
+    const colCount = colsOk ? (t.columns as unknown[]).length : 0;
+    console.log(
+      `[schema-parse]   table[${i}]: name=${JSON.stringify(t.name)} (${nameOk ? "OK" : "FAIL"})` +
+      ` | columns isArray=${colsOk} count=${colCount}` +
+      ` | relationships isArray=${Array.isArray(t.relationships)} count=${Array.isArray(t.relationships) ? (t.relationships as unknown[]).length : 0}`
+    );
+    if (!nameOk || !colsOk) {
+      console.error(`[schema-parse]   table[${i}] WILL BE FILTERED OUT — raw:`, JSON.stringify(t).slice(0, 300));
+    }
+  }
+
   // Validate and normalize each table entry
-  const tables: ParsedTable[] = (result.tables as Array<Record<string, unknown>>)
+  const tables: ParsedTable[] = rawTables
     .filter((t) => typeof t.name === "string" && (t.name as string).length > 0 && Array.isArray(t.columns))
     .map((t) => ({
       name: t.name as string,
@@ -499,15 +543,27 @@ ${rawContent}`,
         : [],
     }));
 
+  console.log("[schema-parse] ── STAGE 5: FINAL OUTPUT ──");
+  console.log("[schema-parse] tables after validation:", tables.length, "of", rawTables.length, "raw entries");
+
   if (tables.length === 0) {
-    const error = `LLM returned data but no valid table entries. Raw: ${JSON.stringify(result.tables).slice(0, 300)}`;
-    console.error("[schema-parser]", error);
+    const error = `All ${rawTables.length} LLM table entries were filtered out during validation. First raw entry: ${JSON.stringify(rawTables[0]).slice(0, 300)}`;
+    console.error("[schema-parse] FAIL:", error);
     return { parsed: rawContent, tables: [], error };
   }
 
-  const ddl = typeof result.ddl === "string" ? result.ddl : rawContent;
+  for (const t of tables) {
+    const pks = t.columns.filter(c => c.isPrimaryKey).map(c => c.name);
+    const rels = (t.relationships || []).map(r => `${r.fromCol}→${r.toTable}.${r.toCol}`);
+    console.log(
+      `[schema-parse]   ✓ ${t.name}: ${t.columns.length} cols` +
+      ` | PKs: ${pks.length > 0 ? pks.join(", ") : "(none)"}` +
+      ` | FKs: ${rels.length > 0 ? rels.join(", ") : "(none)"}`
+    );
+  }
 
-  console.log("[schema-parser] Parsed", tables.length, "tables:", tables.map((t) => `${t.name}(${t.columns.length}cols)`).join(", "));
+  const ddl = typeof result.ddl === "string" ? result.ddl : rawContent;
+  console.log("[schema-parse] DDL source:", typeof result.ddl === "string" ? "from LLM" : "fallback to rawContent", "| length:", ddl.length);
 
   return { parsed: ddl, tables };
 }
