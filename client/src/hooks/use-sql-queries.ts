@@ -84,6 +84,27 @@ export function useDeleteSqlQuery() {
 
 // ─── Feedback ────────────────────────────────────────────────────────
 
+export interface ContextBlock {
+  key: string;
+  label: string;
+  content: string;
+  itemCount?: number;
+}
+
+export function useAnalysisContext() {
+  return useMutation<ContextBlock[], Error, { queryId: number; dialect?: string; content?: string }>({
+    mutationFn: async ({ queryId, dialect, content }) => {
+      const res = await fetch(buildUrl("/api/sql-queries/:id/analysis-context" as any, { id: queryId }), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dialect, content }),
+      });
+      if (!res.ok) throw new Error("Failed to fetch analysis context");
+      return res.json();
+    },
+  });
+}
+
 export function useQueryFeedback(queryId: number | null) {
   return useQuery<QueryFeedbackRow[]>({
     queryKey: ["feedback", queryId],
