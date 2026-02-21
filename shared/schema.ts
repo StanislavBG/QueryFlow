@@ -69,13 +69,15 @@ export type UpdateSqlQuery = z.infer<typeof updateSqlQuerySchema>;
 export const queryFeedback = pgTable("query_feedback", {
   id: serial("id").primaryKey(),
   queryId: integer("query_id").notNull(),
-  agentType: varchar("agent_type", { length: 50 }).notNull(), // 'structure', 'optimization', 'error', 'style'
+  agentType: varchar("agent_type", { length: 50 }).notNull(), // dynamic: 'structure', 'optimization', 'security', etc.
   severity: varchar("severity", { length: 20 }).notNull(), // 'info', 'warning', 'error', 'success'
   title: varchar("title", { length: 255 }).notNull(),
   message: text("message").notNull(),
   suggestion: text("suggestion"),
   lineNumber: integer("line_number"),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
   isResolved: boolean("is_resolved").notNull().default(false),
+  isDismissed: boolean("is_dismissed").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

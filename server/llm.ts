@@ -133,6 +133,7 @@ export interface PreviousFeedbackItem {
   suggestion: string | null;
   lineNumber: number | null;
   isResolved: boolean;
+  isDismissed: boolean;
 }
 
 export async function llmAnalyzeQuery(
@@ -164,8 +165,9 @@ export async function llmAnalyzeQuery(
 
   // Pass full previous analysis state so the LLM can learn from user decisions
   if (options.previousFeedback && options.previousFeedback.length > 0) {
-    const accepted = options.previousFeedback.filter(f => f.isResolved);
-    const dismissed = options.previousFeedback.filter(f => !f.isResolved);
+    const accepted = options.previousFeedback.filter(f => f.isResolved && !f.isDismissed);
+    const dismissed = options.previousFeedback.filter(f => f.isResolved && f.isDismissed);
+    const unresolved = options.previousFeedback.filter(f => !f.isResolved);
 
     if (accepted.length > 0) {
       const acceptedText = accepted
@@ -178,7 +180,14 @@ export async function llmAnalyzeQuery(
       const dismissedText = dismissed
         .map(f => `- [${f.agentType}/${f.severity}] "${f.title}": ${f.message}${f.suggestion ? ` → Suggestion: ${f.suggestion}` : ""}`)
         .join("\n");
-      contextParts.push(`\n## Previous Unresolved Feedback (from last analysis run — avoid repeating these exact findings unless the underlying issue persists in the current SQL; use them as context to provide deeper or more refined analysis):\n${dismissedText}`);
+      contextParts.push(`\n## Dismissed Feedback (user marked these as WRONG or NOT RELEVANT — do NOT repeat these findings or similar patterns. The user considers them incorrect or inapplicable):\n${dismissedText}`);
+    }
+
+    if (unresolved.length > 0) {
+      const unresolvedText = unresolved
+        .map(f => `- [${f.agentType}/${f.severity}] "${f.title}": ${f.message}${f.suggestion ? ` → Suggestion: ${f.suggestion}` : ""}`)
+        .join("\n");
+      contextParts.push(`\n## Previous Unresolved Feedback (from last analysis run — avoid repeating these exact findings unless the underlying issue persists; provide deeper or more refined analysis instead):\n${unresolvedText}`);
     }
   }
 

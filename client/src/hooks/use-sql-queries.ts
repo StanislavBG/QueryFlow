@@ -179,6 +179,37 @@ export function useResolveFeedback() {
   });
 }
 
+export function useDeleteFeedbackItem() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, { id: number; queryId: number }>({
+    mutationFn: async ({ id }) => {
+      const res = await fetch(buildUrl(api.feedback.delete.path, { id }), {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to delete feedback");
+    },
+    onSuccess: (_, { queryId }) => {
+      queryClient.invalidateQueries({ queryKey: ["feedback", queryId] });
+    },
+  });
+}
+
+export function useDismissFeedback() {
+  const queryClient = useQueryClient();
+  return useMutation<QueryFeedbackRow, Error, { id: number; queryId: number }>({
+    mutationFn: async ({ id }) => {
+      const res = await fetch(buildUrl(api.feedback.dismiss.path, { id }), {
+        method: "PATCH",
+      });
+      if (!res.ok) throw new Error("Failed to dismiss feedback");
+      return res.json();
+    },
+    onSuccess: (_, { queryId }) => {
+      queryClient.invalidateQueries({ queryKey: ["feedback", queryId] });
+    },
+  });
+}
+
 // ─── Format ──────────────────────────────────────────────────────────
 
 export function useFormatQuery() {

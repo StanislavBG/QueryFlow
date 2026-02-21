@@ -54,6 +54,7 @@ export interface IStorage {
   deleteFeedbackById(id: number): Promise<void>;
   deleteFeedbackByQueryId(queryId: number): Promise<void>;
   resolveFeedback(id: number): Promise<QueryFeedbackRow | undefined>;
+  dismissFeedback(id: number): Promise<QueryFeedbackRow | undefined>;
 
   // Agent Settings
   getAgentSettings(): Promise<AgentSettings[]>;
@@ -254,6 +255,15 @@ export class DatabaseStorage implements IStorage {
     const [updated] = await db
       .update(queryFeedback)
       .set({ isResolved: true })
+      .where(eq(queryFeedback.id, id))
+      .returning();
+    return updated ? decryptFeedback(updated) : undefined;
+  }
+
+  async dismissFeedback(id: number): Promise<QueryFeedbackRow | undefined> {
+    const [updated] = await db
+      .update(queryFeedback)
+      .set({ isResolved: true, isDismissed: true })
       .where(eq(queryFeedback.id, id))
       .returning();
     return updated ? decryptFeedback(updated) : undefined;

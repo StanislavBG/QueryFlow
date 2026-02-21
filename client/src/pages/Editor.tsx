@@ -549,6 +549,12 @@ export default function Editor() {
                   hoveredLine={hoveredEditorLine}
                   activeLine={cursorLine}
                   onFeedbackHover={handleFeedbackHover}
+                  onApplySuggestion={(beforeSql, afterSql) => {
+                    const current = resolvedQueryContent;
+                    if (current.includes(beforeSql)) {
+                      setCurrentContent(current.replace(beforeSql, afterSql));
+                    }
+                  }}
                 />
               )}
 

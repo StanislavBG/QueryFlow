@@ -113,6 +113,22 @@ export const api = {
         404: errorSchemas.notFound,
       },
     },
+    dismiss: {
+      method: 'PATCH' as const,
+      path: '/api/feedback/:id/dismiss' as const,
+      responses: {
+        200: z.custom<typeof queryFeedback.$inferSelect>(),
+        404: errorSchemas.notFound,
+      },
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/feedback/:id' as const,
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        404: errorSchemas.notFound,
+      },
+    },
   },
 
   format: {
