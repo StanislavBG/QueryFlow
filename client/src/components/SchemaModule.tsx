@@ -17,6 +17,9 @@ import {
   Columns3,
   Plus,
   Key,
+  Bug,
+  Copy,
+  Check,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { UserSchema } from "@shared/schema";
@@ -29,6 +32,28 @@ interface ColumnInfo {
   name: string;
   type: string;
   isPrimaryKey: boolean;
+}
+
+/**
+ * Split a CREATE TABLE body into column/constraint definitions.
+ * Handles commas inside parentheses (e.g. decimal(12,7)) correctly.
+ */
+function splitColumnDefs(body: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let depth = 0;
+  for (const ch of body) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts.filter(Boolean);
 }
 
 function parseColumnsFromDdl(
@@ -48,7 +73,7 @@ function parseColumnsFromDdl(
   }
 
   const body = match[1];
-  const lines = body.split(",").map((l) => l.trim()).filter(Boolean);
+  const lines = splitColumnDefs(body);
   const columns: ColumnInfo[] = [];
 
   for (const line of lines) {
@@ -519,6 +544,8 @@ function detectRelationships(tables: ERDTable[], ddl: string): ERDRelationship[]
 
 export function SchemaERD() {
   const { data: schemas } = useUserSchemas();
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const { tables, relationships, ddl } = useMemo(() => {
     if (!schemas) return { tables: [] as ERDTable[], relationships: [] as ERDRelationship[], ddl: "" };
@@ -536,6 +563,13 @@ export function SchemaERD() {
 
     return { tables: allTables, relationships: rels, ddl: allDdl };
   }, [schemas]);
+
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 1500);
+    });
+  };
 
   if (tables.length === 0) {
     return (
@@ -624,6 +658,138 @@ export function SchemaERD() {
             </div>
           );
         })}
+      </div>
+
+      {/* Debug / Inspect Panel */}
+      <div className="mt-6 border border-border rounded-lg bg-card overflow-hidden">
+        <button
+          onClick={() => setDebugOpen(!debugOpen)}
+          className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-accent/30 transition-colors"
+        >
+          <Bug className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium text-muted-foreground">Schema Debug Inspector</span>
+          <span className="text-[9px] text-muted-foreground/50 ml-1">
+            {schemas?.length || 0} schema{(schemas?.length || 0) !== 1 ? "s" : ""} · {tables.length} table{tables.length !== 1 ? "s" : ""} · {tables.reduce((s, t) => s + t.columns.length, 0)} columns
+          </span>
+          {debugOpen ? (
+            <ChevronDown className="w-3 h-3 text-muted-foreground ml-auto" />
+          ) : (
+            <ChevronRight className="w-3 h-3 text-muted-foreground ml-auto" />
+          )}
+        </button>
+
+        {debugOpen && schemas && (
+          <div className="border-t border-border divide-y divide-border/50">
+            {schemas.map((schema) => {
+              const schemaTables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+              const tablesJson = JSON.stringify(schemaTables, null, 2);
+              const rawDdl = schema.parsedDdl || "(no DDL generated)";
+
+              return (
+                <div key={schema.id} className="p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Database className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-xs font-semibold">{schema.name}</span>
+                    <Badge variant="outline" className="text-[9px] h-4">
+                      {schemaTables.length} table{schemaTables.length !== 1 ? "s" : ""}
+                    </Badge>
+                  </div>
+
+                  {/* Per-table column summary */}
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Tables & Column Counts</p>
+                    {schemaTables.length === 0 ? (
+                      <p className="text-[10px] text-destructive">No tables were parsed from this schema input.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {schemaTables.map((t, ti) => {
+                          const parsed = parseColumnsFromDdl(schema.parsedDdl || "", t.name, t.columns);
+                          const pkCount = parsed.filter((c) => c.isPrimaryKey).length;
+                          const hasTypes = parsed.some((c) => c.type !== "");
+                          return (
+                            <Badge key={ti} variant="secondary" className="text-[9px] h-5 font-mono gap-1">
+                              {t.name}
+                              <span className="text-muted-foreground">
+                                {parsed.length}col{parsed.length !== 1 ? "s" : ""}
+                                {pkCount > 0 && ` · ${pkCount}pk`}
+                                {!hasTypes && " · no types"}
+                              </span>
+                            </Badge>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Tables JSON */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">LLM Tables JSON</p>
+                      <button
+                        onClick={() => copyToClipboard(tablesJson, `json-${schema.id}`)}
+                        className="p-0.5 rounded hover:bg-accent/50 transition-colors"
+                        title="Copy JSON"
+                      >
+                        {copiedField === `json-${schema.id}` ? (
+                          <Check className="w-3 h-3 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-muted-foreground" />
+                        )}
+                      </button>
+                    </div>
+                    <pre className="text-[10px] font-mono bg-muted/50 rounded p-2 max-h-[200px] overflow-auto whitespace-pre-wrap text-muted-foreground">
+                      {tablesJson}
+                    </pre>
+                  </div>
+
+                  {/* Parsed DDL */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Generated DDL</p>
+                      <button
+                        onClick={() => copyToClipboard(rawDdl, `ddl-${schema.id}`)}
+                        className="p-0.5 rounded hover:bg-accent/50 transition-colors"
+                        title="Copy DDL"
+                      >
+                        {copiedField === `ddl-${schema.id}` ? (
+                          <Check className="w-3 h-3 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-muted-foreground" />
+                        )}
+                      </button>
+                    </div>
+                    <pre className="text-[10px] font-mono bg-muted/50 rounded p-2 max-h-[300px] overflow-auto whitespace-pre-wrap text-muted-foreground">
+                      {rawDdl}
+                    </pre>
+                  </div>
+
+                  {/* Raw content preview */}
+                  {schema.rawContent && (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Raw Input (first 500 chars)</p>
+                        <button
+                          onClick={() => copyToClipboard(schema.rawContent || "", `raw-${schema.id}`)}
+                          className="p-0.5 rounded hover:bg-accent/50 transition-colors"
+                          title="Copy raw input"
+                        >
+                          {copiedField === `raw-${schema.id}` ? (
+                            <Check className="w-3 h-3 text-emerald-500" />
+                          ) : (
+                            <Copy className="w-3 h-3 text-muted-foreground" />
+                          )}
+                        </button>
+                      </div>
+                      <pre className="text-[10px] font-mono bg-muted/50 rounded p-2 max-h-[150px] overflow-auto whitespace-pre-wrap text-muted-foreground/70">
+                        {schema.rawContent.slice(0, 500)}{schema.rawContent.length > 500 ? "…" : ""}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
