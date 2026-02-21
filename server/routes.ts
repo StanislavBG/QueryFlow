@@ -256,7 +256,7 @@ export async function registerRoutes(
       : undefined;
 
     // Gather full previous feedback state so the LLM can learn from user
-    // decisions (accepted/resolved vs. unresolved/dismissed).
+    // decisions: accepted (resolved + !dismissed), dismissed (resolved + dismissed), and unresolved.
     const existingFeedback = await storage.getFeedbackByQueryId(queryId);
     const previousFeedback = existingFeedback.map(f => ({
       agentType: f.agentType,
@@ -266,6 +266,7 @@ export async function registerRoutes(
       suggestion: f.suggestion,
       lineNumber: f.lineNumber,
       isResolved: f.isResolved,
+      isDismissed: f.isDismissed,
     }));
 
     // Clear only unresolved feedback; keep resolved items as a persistent
@@ -294,16 +295,21 @@ export async function registerRoutes(
         dialect
       );
 
-      const feedbackItems = validated.map(r => ({
-        queryId,
-        agentType: r.agentType,
-        severity: r.severity,
-        title: r.title,
-        message: r.message,
-        suggestion: r.suggestion ?? null,
-        lineNumber: r.lineNumber ?? null,
-        isResolved: false,
-      }));
+      const feedbackItems = validated.map(r => {
+        const { agentType, severity, title, message, suggestion, lineNumber, ...extra } = r;
+        return {
+          queryId,
+          agentType,
+          severity,
+          title,
+          message,
+          suggestion: suggestion ?? null,
+          lineNumber: lineNumber ?? null,
+          metadata: Object.keys(extra).length > 0 ? extra : {},
+          isResolved: false,
+          isDismissed: false,
+        };
+      });
 
       const created = await storage.createFeedbackBatch(feedbackItems);
       sendEvent({ done: true, results: created });
@@ -325,6 +331,27 @@ export async function registerRoutes(
       return res.status(404).json({ message: "Feedback not found" });
     }
     res.json(feedback);
+  });
+
+  app.patch("/api/feedback/:id/dismiss", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ message: "Invalid feedback ID" });
+    }
+    const feedback = await storage.dismissFeedback(id);
+    if (!feedback) {
+      return res.status(404).json({ message: "Feedback not found" });
+    }
+    res.json(feedback);
+  });
+
+  app.delete("/api/feedback/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ message: "Invalid feedback ID" });
+    }
+    await storage.deleteFeedbackById(id);
+    res.json({ success: true });
   });
 
   // ─── Format Route (LLM-powered with local fallback) ────────────────

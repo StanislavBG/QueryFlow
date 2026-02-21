@@ -52,9 +52,13 @@ export async function ensureTables(): Promise<void> {
         message TEXT NOT NULL,
         suggestion TEXT,
         line_number INTEGER,
+        metadata JSONB DEFAULT '{}',
         is_resolved BOOLEAN NOT NULL DEFAULT false,
+        is_dismissed BOOLEAN NOT NULL DEFAULT false,
         created_at TIMESTAMP DEFAULT NOW()
       );
+      ALTER TABLE query_feedback ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
+      ALTER TABLE query_feedback ADD COLUMN IF NOT EXISTS is_dismissed BOOLEAN NOT NULL DEFAULT false;
 
       CREATE TABLE IF NOT EXISTS agent_settings (
         id SERIAL PRIMARY KEY,
