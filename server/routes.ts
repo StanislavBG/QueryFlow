@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
 import { formatSQL } from "./formatter";
-import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmAskQuestion, llmParseSchema } from "./llm";
+import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema } from "./llm";
 import { requireAdmin, resolveAppUser, logActivity } from "./auth";
 
 // All available analysis categories
@@ -237,7 +237,7 @@ export async function registerRoutes(
     }
 
     try {
-      // Single LLM call: analyze + self-validate in one context window
+      // Call 1: Generate recommendations
       const llmResults = await llmAnalyzeQuery(query.content, {
         dialect,
         schemas: schemaContext,
@@ -246,7 +246,15 @@ export async function registerRoutes(
         enabledCategories,
       });
 
-      const feedbackItems = llmResults.map(r => ({
+      // Call 2: Independent QA validation — separate call reviews each
+      // suggestion for semantic/logical/performance safety
+      const validated = await llmValidateRecommendations(
+        query.content,
+        llmResults,
+        dialect
+      );
+
+      const feedbackItems = validated.map(r => ({
         queryId,
         agentType: r.agentType,
         severity: r.severity,
