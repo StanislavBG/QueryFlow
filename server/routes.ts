@@ -196,7 +196,7 @@ export async function registerRoutes(
 
     if (!isLLMConfigured()) {
       return res.status(503).json({
-        message: "LLM not configured. Set ANTHROPIC_API_KEY to enable analysis.",
+        message: "LLM not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY to enable analysis.",
       });
     }
 
@@ -367,7 +367,7 @@ export async function registerRoutes(
 
       if (!isLLMConfigured()) {
         return res.status(503).json({
-          message: "LLM not configured. Set ANTHROPIC_API_KEY in your environment.",
+          message: "LLM not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY in your environment.",
         });
       }
 
@@ -440,7 +440,7 @@ export async function registerRoutes(
           console.error("[schema-route]", parseError, err);
         }
       } else {
-        parseError = "LLM not configured. Set ANTHROPIC_API_KEY to enable schema parsing.";
+        parseError = "LLM not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY to enable schema parsing.";
         console.warn("[schema-route]", parseError);
       }
 
