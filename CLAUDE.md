@@ -4,6 +4,18 @@
 
 - **All buttons, parsers, and smart features must be LLM-based.** Do not write local heuristic/regex parsing logic or rule-based feature implementations. Any intelligent behavior (schema parsing, format detection, query analysis, etc.) should go through an LLM call.
 
+## Replit Build Environment
+
+Replit is the build and deployment environment for this project. Claude must maintain `replit.md` so that the user only needs to **git sync** and **deploy** on Replit — no manual steps beyond that (except `npm install` when `package.json` changes).
+
+### `replit.md` Maintenance Rules
+- **Never reference `drizzle-kit`** or any migration tooling in `replit.md`. Replit's deployment provisioner reads this file and auto-generates destructive SQL migrations (DROP TABLE, DROP COLUMN) when it detects migration tool references.
+- When adding new database tables or columns, update `replit.md` to reflect the current schema under the "Tables" section.
+- When adding new API endpoints, update the "Key API Endpoints" section in `replit.md`.
+- When adding new environment variables, update the "Required Environment Variables" section in `replit.md`.
+- Keep the "Key NPM Dependencies" section current when significant packages are added or removed.
+- The "Migration Strategy" and "Deployment" sections must always accurately describe the `ensureTables()` pattern and explicitly state that no migration tooling is used.
+
 ## Pre-Deploy Checklist (Replit)
 
 After git-sync and before building/deploying, check if any of these apply. If they do, **notify the user with the exact command(s) to run in the Replit Shell before clicking Build/Deploy.**
