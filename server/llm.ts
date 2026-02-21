@@ -1,20 +1,20 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 
-let client: Anthropic | null = null;
+let client: OpenAI | null = null;
 
-function getClient(): Anthropic {
+/** Default model for Replit AI integrations (OpenAI-compatible proxy). */
+const MODEL = "gpt-4o";
+
+function getClient(): OpenAI {
   if (!client) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    const baseURL = process.env.ANTHROPIC_BASE_URL;
+    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
 
     if (!apiKey && !baseURL) {
-      throw new Error("ANTHROPIC_API_KEY is not set. Add it to your environment to enable LLM features.");
+      throw new Error("AI_INTEGRATIONS_OPENAI_API_KEY is not set. Add it to your Replit Secrets to enable LLM features.");
     }
 
-    // When a proxy base URL is set without an explicit API key,
-    // the proxy handles authentication — pass a placeholder key
-    // so the SDK doesn't throw at construction time.
-    client = new Anthropic({
+    client = new OpenAI({
       apiKey: apiKey || "proxy-handled",
       ...(baseURL ? { baseURL } : {}),
     });
@@ -23,11 +23,16 @@ function getClient(): Anthropic {
 }
 
 export function isLLMConfigured(): boolean {
-  return !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_BASE_URL);
+  return !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_BASE_URL);
+}
+
+/** Helper: extract text from an OpenAI chat completion response. */
+function extractText(response: OpenAI.Chat.Completions.ChatCompletion): string {
+  return response.choices[0]?.message?.content ?? "";
 }
 
 /**
- * Format a SQL query using Claude per international SQL documentation standards
+ * Format a SQL query per international SQL documentation standards
  * (ISO/IEC 9075 style conventions, human readability best practices).
  */
 export async function llmFormatQuery(
@@ -35,14 +40,14 @@ export async function llmFormatQuery(
   dialect: string = "Standard SQL",
   schemas?: string
 ): Promise<{ formatted: string; notes: string }> {
-  const anthropic = getClient();
+  const openai = getClient();
 
   const schemaContext = schemas
     ? `\n\nThe user has the following schema definitions for context:\n${schemas}`
     : "";
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
+  const response = await openai.chat.completions.create({
+    model: MODEL,
     max_tokens: 8192,
     messages: [
       {
@@ -77,7 +82,7 @@ ${sql}
     ],
   });
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
+  const text = extractText(response);
 
   // Parse JSON from response
   const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -123,7 +128,7 @@ export async function llmAnalyzeQuery(
   suggestion: string | null;
   lineNumber: number | null;
 }>> {
-  const anthropic = getClient();
+  const openai = getClient();
 
   const dialect = options.dialect || "Standard SQL";
   const categories = options.enabledCategories || [
@@ -161,8 +166,8 @@ export async function llmAnalyzeQuery(
     }
   }).filter(Boolean).join("\n");
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
+  const response = await openai.chat.completions.create({
+    model: MODEL,
     max_tokens: 4096,
     messages: [
       {
@@ -201,7 +206,7 @@ ${sql}
     ],
   });
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
+  const text = extractText(response);
 
   const jsonMatch = text.match(/\[[\s\S]*\]/);
   if (jsonMatch) {
@@ -251,7 +256,7 @@ export async function llmValidateRecommendations(
     return recommendations;
   }
 
-  const anthropic = getClient();
+  const openai = getClient();
 
   // Build the evaluation prompt with all before/after pairs
   const pairs = withSuggestions.map((r, i) => (
@@ -260,8 +265,8 @@ Message: ${r.message}
 Suggestion: ${r.suggestion}`
   )).join("\n\n");
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
+  const response = await openai.chat.completions.create({
+    model: MODEL,
     max_tokens: 4096,
     messages: [
       {
@@ -296,7 +301,7 @@ Return ONLY the JSON array.`,
     ],
   });
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
+  const text = extractText(response);
 
   let verdicts: Array<{ index: number; verdict: string; reason: string }> = [];
   const jsonMatch = text.match(/\[[\s\S]*\]/);
@@ -354,7 +359,7 @@ export async function llmAskQuestion(
   schemas?: string,
   dialect?: string
 ): Promise<string> {
-  const anthropic = getClient();
+  const openai = getClient();
 
   const parts: string[] = [];
   parts.push("You are a helpful, non-judgmental SQL advisor. Answer the analyst's question clearly and concisely.");
@@ -374,13 +379,13 @@ export async function llmAskQuestion(
   parts.push(`\nQuestion: ${question}`);
   parts.push("\nProvide a clear, helpful answer. Use markdown formatting. If suggesting SQL changes, show the code.");
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
+  const response = await openai.chat.completions.create({
+    model: MODEL,
     max_tokens: 4096,
     messages: [{ role: "user", content: parts.join("\n") }],
   });
 
-  return response.content[0].type === "text" ? response.content[0].text : "Unable to process the question.";
+  return extractText(response) || "Unable to process the question.";
 }
 
 /**
@@ -427,12 +432,12 @@ export async function llmParseSchema(
   rawContent: string,
   fileName: string
 ): Promise<{ parsed: string; tables: Array<{ name: string; columns: string[] }>; error?: string }> {
-  const anthropic = getClient();
+  const openai = getClient();
 
   console.log("[schema-parser] Starting parse for:", fileName, "content length:", rawContent.length);
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
+  const response = await openai.chat.completions.create({
+    model: MODEL,
     max_tokens: 8192,
     messages: [
       {
@@ -457,7 +462,7 @@ ${rawContent}`,
     ],
   });
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
+  const text = extractText(response);
 
   console.log("[schema-parser] LLM response length:", text.length, "preview:", text.slice(0, 500));
 

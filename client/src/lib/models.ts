@@ -1,10 +1,10 @@
-// LLM model definition — locked to Claude Opus 4.6
+// LLM model definition — OpenAI GPT-4o via Replit AI integrations
 
 export const MODEL = {
-  id: "claude-opus-4-6",
-  name: "Claude Opus 4.6",
+  id: "gpt-4o",
+  name: "GPT-4o",
   maxQueryChars: 680_000,
-  contextTokens: 200_000,
+  contextTokens: 128_000,
 } as const;
 
 // ── SQL Dialect Detection ────────────────────────────────────────────
