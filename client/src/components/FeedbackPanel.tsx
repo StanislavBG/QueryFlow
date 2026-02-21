@@ -1,4 +1,4 @@
-import { useQueryFeedback, useAnalyzeQuery, useResolveFeedback, type AnalysisProgress } from "@/hooks/use-sql-queries";
+import { useQueryFeedback, useAnalyzeQuery, useResolveFeedback, useDismissFeedback, useDeleteFeedbackItem, type AnalysisProgress } from "@/hooks/use-sql-queries";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,6 +12,8 @@ import {
   ChevronDown,
   ChevronRight,
   Check,
+  X,
+  Trash2,
   Search,
   Zap,
   Bug,
@@ -19,8 +21,13 @@ import {
   PlayCircle,
   BookOpen,
   AlignLeft,
+  Shield,
+  Scale,
+  Database,
+  Lightbulb,
+  Tag,
 } from "lucide-react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import type { QueryFeedbackRow } from "@shared/schema";
 
 const severityConfig = {
@@ -54,14 +61,49 @@ const severityConfig = {
   },
 };
 
-const agentConfig = {
-  structure: { icon: Search, label: "Structure", color: "text-muted-foreground" },
-  optimization: { icon: Zap, label: "Performance", color: "text-muted-foreground" },
-  error: { icon: Bug, label: "Correctness", color: "text-muted-foreground" },
-  style: { icon: Palette, label: "Style", color: "text-muted-foreground" },
-  formatting: { icon: AlignLeft, label: "Formatting", color: "text-muted-foreground" },
-  documentation: { icon: BookOpen, label: "Documentation", color: "text-primary" },
+// Known category icons/labels, with a fallback for dynamic LLM categories
+const knownAgentConfig: Record<string, { icon: typeof Search; label: string }> = {
+  structure: { icon: Search, label: "Structure" },
+  optimization: { icon: Zap, label: "Performance" },
+  error: { icon: Bug, label: "Correctness" },
+  style: { icon: Palette, label: "Style" },
+  formatting: { icon: AlignLeft, label: "Formatting" },
+  documentation: { icon: BookOpen, label: "Documentation" },
+  security: { icon: Shield, label: "Security" },
+  compliance: { icon: Scale, label: "Compliance" },
+  schema_design: { icon: Database, label: "Schema Design" },
+  alternative_design: { icon: Lightbulb, label: "Alternative" },
 };
+
+function getAgentConfig(agentType: string): { icon: typeof Search; label: string } {
+  if (knownAgentConfig[agentType]) return knownAgentConfig[agentType];
+  // Dynamic fallback: humanize the slug
+  const label = agentType
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+  return { icon: Tag, label };
+}
+
+/** Render a before/after SQL diff comparison. */
+function SqlBeforeAfter({ before, after }: { before: string; after: string }) {
+  return (
+    <div className="ml-6.5 space-y-1.5">
+      <div className="rounded-md border border-destructive/20 bg-destructive/5 p-2 overflow-x-auto">
+        <div className="flex items-center gap-1 mb-1">
+          <span className="text-[9px] font-semibold text-destructive uppercase tracking-wide">Before</span>
+        </div>
+        <pre className="text-[11px] leading-relaxed text-foreground/70 whitespace-pre-wrap font-mono">{before}</pre>
+      </div>
+      <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 p-2 overflow-x-auto">
+        <div className="flex items-center gap-1 mb-1">
+          <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">After</span>
+        </div>
+        <pre className="text-[11px] leading-relaxed text-foreground/70 whitespace-pre-wrap font-mono">{after}</pre>
+      </div>
+    </div>
+  );
+}
 
 function FeedbackCard({
   feedback,
@@ -69,24 +111,40 @@ function FeedbackCard({
   isHighlighted,
   isActiveLineMatch,
   onHover,
+  onApplySuggestion,
 }: {
   feedback: QueryFeedbackRow;
   queryId: number;
   isHighlighted?: boolean;
   isActiveLineMatch?: boolean;
   onHover?: (feedbackId: number | null) => void;
+  onApplySuggestion?: (beforeSql: string, afterSql: string) => void;
 }) {
   const [expanded, setExpanded] = useState(!feedback.isResolved);
   const resolveMutation = useResolveFeedback();
+  const dismissMutation = useDismissFeedback();
+  const deleteMutation = useDeleteFeedbackItem();
+
   const severity = severityConfig[feedback.severity as keyof typeof severityConfig] || severityConfig.info;
-  const agent = agentConfig[feedback.agentType as keyof typeof agentConfig] || agentConfig.structure;
+  const agent = getAgentConfig(feedback.agentType);
   const SeverityIcon = severity.icon;
   const AgentIcon = agent.icon;
+
+  // Extract before/after SQL from metadata
+  const meta = (feedback.metadata || {}) as Record<string, unknown>;
+  const beforeSql = typeof meta.beforeSql === "string" ? meta.beforeSql : null;
+  const afterSql = typeof meta.afterSql === "string" ? meta.afterSql : null;
+  const hasBeforeAfter = beforeSql && afterSql;
+
+  const isAccepted = feedback.isResolved && !feedback.isDismissed;
+  const isDismissed = feedback.isResolved && feedback.isDismissed;
+  const isOpen = !feedback.isResolved;
+  const isActionPending = resolveMutation.isPending || dismissMutation.isPending || deleteMutation.isPending;
 
   return (
     <div
       className={`rounded-md border ${severity.border} ${severity.bg} ${
-        feedback.isResolved ? "opacity-50" : ""
+        feedback.isResolved ? "opacity-60" : ""
       } ${
         isHighlighted
           ? "ring-2 ring-primary ring-offset-1 ring-offset-background"
@@ -103,17 +161,22 @@ function FeedbackCard({
       >
         <SeverityIcon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${severity.color}`} />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-sm font-medium">{feedback.title}</span>
-            {feedback.isResolved && (
-              <Badge variant="outline" className="text-[10px] h-4">
-                Addressed
+          <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+            <span className="text-sm font-medium leading-tight">{feedback.title}</span>
+            {isAccepted && (
+              <Badge variant="outline" className="text-[9px] h-3.5 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+                Accepted
+              </Badge>
+            )}
+            {isDismissed && (
+              <Badge variant="outline" className="text-[9px] h-3.5 border-destructive/30 text-destructive bg-destructive/10 line-through">
+                Dismissed
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <Badge variant="outline" className="text-[10px] h-4">
-              <AgentIcon className={`w-2.5 h-2.5 mr-1 ${agent.color}`} />
+              <AgentIcon className="w-2.5 h-2.5 mr-1 text-muted-foreground" />
               {agent.label}
             </Badge>
             {feedback.lineNumber && (
@@ -139,27 +202,70 @@ function FeedbackCard({
           <p className="text-xs text-muted-foreground leading-relaxed pl-6.5">
             {feedback.message}
           </p>
-          {feedback.suggestion && (
+
+          {/* Before/After SQL comparison */}
+          {hasBeforeAfter && (
+            <SqlBeforeAfter before={beforeSql!} after={afterSql!} />
+          )}
+
+          {/* Text suggestion (shown when no before/after available) */}
+          {feedback.suggestion && !hasBeforeAfter && (
             <div className="ml-6.5 p-2 rounded-md bg-muted/50 border border-border">
               <p className="text-xs text-foreground/80 leading-relaxed">
                 <span className="font-medium text-primary">Suggestion:</span> {feedback.suggestion}
               </p>
             </div>
           )}
-          {!feedback.isResolved && (
-            <div className="pl-6.5">
+
+          {/* Action buttons */}
+          {isOpen && (
+            <div className="pl-6.5 flex items-center gap-1">
+              {/* Accept / Apply */}
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (hasBeforeAfter && onApplySuggestion) {
+                    onApplySuggestion(beforeSql!, afterSql!);
+                  }
                   resolveMutation.mutate({ id: feedback.id, queryId });
                 }}
-                disabled={resolveMutation.isPending}
-                className="h-6 text-[10px] text-muted-foreground"
+                disabled={isActionPending}
+                className="h-6 text-[10px] text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 hover:bg-emerald-500/10"
               >
                 <Check className="w-3 h-3 mr-1" />
-                Mark as addressed
+                {hasBeforeAfter ? "Apply" : "Accept"}
+              </Button>
+
+              {/* Dismiss / Wrong */}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  dismissMutation.mutate({ id: feedback.id, queryId });
+                }}
+                disabled={isActionPending}
+                className="h-6 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              >
+                <X className="w-3 h-3 mr-1" />
+                Wrong
+              </Button>
+
+              {/* Delete */}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteMutation.mutate({ id: feedback.id, queryId });
+                }}
+                disabled={isActionPending}
+                className="h-6 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 className="w-3 h-3 mr-1" />
+                Delete
               </Button>
             </div>
           )}
@@ -243,9 +349,10 @@ interface FeedbackPanelProps {
   hoveredLine?: number | null;
   activeLine?: number | null;
   onFeedbackHover?: (lineNumbers: Set<number>) => void;
+  onApplySuggestion?: (beforeSql: string, afterSql: string) => void;
 }
 
-export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, activeLine, onFeedbackHover }: FeedbackPanelProps) {
+export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, activeLine, onFeedbackHover, onApplySuggestion }: FeedbackPanelProps) {
   const { data: feedback, isLoading: isFeedbackLoading } = useQueryFeedback(queryId);
   const { progress: analysisProgress, ...analyzeMutation } = useAnalyzeQuery();
   const [filter, setFilter] = useState<string | null>(null);
@@ -279,8 +386,19 @@ export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, act
   const errorCount = feedback?.filter(f => f.severity === "error" && !f.isResolved).length || 0;
   const warningCount = feedback?.filter(f => f.severity === "warning" && !f.isResolved).length || 0;
 
+  // Build dynamic category list from actual feedback data
+  const dynamicCategories = useMemo(() => {
+    if (!feedback || feedback.length === 0) return [];
+    const counts = new Map<string, number>();
+    for (const f of feedback) {
+      counts.set(f.agentType, (counts.get(f.agentType) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([key, count]) => ({ key, count, ...getAgentConfig(key) }));
+  }, [feedback]);
+
   // Determine which feedback items are highlighted
-  // Priority: hoveredLine (explicit line number hover) > activeLine (cursor position)
   const highlightedFeedbackIds = new Set<number>();
   const activeLineFeedbackIds = new Set<number>();
   if (feedback) {
@@ -326,8 +444,8 @@ export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, act
           </Button>
         </div>
 
-        {/* Filter badges */}
-        {feedback && feedback.length > 0 && (
+        {/* Dynamic filter badges */}
+        {dynamicCategories.length > 0 && (
           <div className="flex items-center gap-1.5 flex-wrap">
             <button
               onClick={() => setFilter(null)}
@@ -335,25 +453,20 @@ export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, act
                 !filter ? "bg-accent border-border" : "border-transparent hover:border-border"
               }`}
             >
-              All ({feedback.length})
+              All ({feedback!.length})
             </button>
-            {Object.entries(agentConfig).map(([key, config]) => {
-              const count = feedback.filter(f => f.agentType === key).length;
-              if (count === 0) return null;
-              const AgentIcon = config.icon;
-              return (
-                <button
-                  key={key}
-                  onClick={() => setFilter(filter === key ? null : key)}
-                  className={`px-2 py-0.5 rounded text-[10px] border flex items-center gap-1 ${
-                    filter === key ? "bg-accent border-border" : "border-transparent hover:border-border"
-                  }`}
-                >
-                  <AgentIcon className="w-2.5 h-2.5" />
-                  {count}
-                </button>
-              );
-            })}
+            {dynamicCategories.map(({ key, count, icon: CatIcon }) => (
+              <button
+                key={key}
+                onClick={() => setFilter(filter === key ? null : key)}
+                className={`px-2 py-0.5 rounded text-[10px] border flex items-center gap-1 ${
+                  filter === key ? "bg-accent border-border" : "border-transparent hover:border-border"
+                }`}
+              >
+                <CatIcon className="w-2.5 h-2.5" />
+                {count}
+              </button>
+            ))}
           </div>
         )}
 
@@ -403,7 +516,11 @@ export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, act
           ) : (
             filteredFeedback
               .sort((a, b) => {
-                if (a.isResolved !== b.isResolved) return a.isResolved ? 1 : -1;
+                // Open items first, then accepted, then dismissed
+                const stateOrder = (f: QueryFeedbackRow) =>
+                  !f.isResolved ? 0 : f.isDismissed ? 2 : 1;
+                const sa = stateOrder(a), sb = stateOrder(b);
+                if (sa !== sb) return sa - sb;
                 const severityOrder: Record<string, number> = { error: 0, warning: 1, info: 2, success: 3 };
                 return (severityOrder[a.severity] || 2) - (severityOrder[b.severity] || 2);
               })
@@ -415,6 +532,7 @@ export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, act
                   isHighlighted={highlightedFeedbackIds.has(item.id)}
                   isActiveLineMatch={activeLineFeedbackIds.has(item.id)}
                   onHover={handleFeedbackHover}
+                  onApplySuggestion={onApplySuggestion}
                 />
               ))
           )}
