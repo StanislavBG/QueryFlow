@@ -107,11 +107,11 @@ ${sql}
 }
 
 /**
- * Unified query analysis via a single LLM call.
+ * Query analysis — single LLM call to generate recommendations.
  *
- * One structured call that analyzes the query across all enabled categories
- * AND self-validates every suggestion for semantic/logical/performance safety.
- * The LLM acts as both analyst and QA reviewer in a single context window.
+ * Passes the query, schema context, documents, dialect, and previously
+ * accepted feedback. Returns structured feedback items across all
+ * enabled categories.
  */
 export async function llmAnalyzeQuery(
   sql: string,
@@ -174,30 +174,23 @@ export async function llmAnalyzeQuery(
     messages: [
       {
         role: "user",
-        content: `You are an expert SQL analyst AND rigorous QA reviewer in one. Analyze this SQL query, provide actionable feedback, and self-validate every suggestion before including it.
+        content: `You are a constructive SQL advisor. Analyze this SQL query and provide actionable feedback. Be non-judgmental and helpful — this is a tool for analysts to improve their work.
 
 ${contextParts.join("\n")}
 
 Analyze across these enabled categories:
 ${categoryDescriptions}
 
-For each feedback item you consider, apply these QA validation checks BEFORE including it:
-1. **Semantic safety**: If your suggestion changes the query, would it preserve the result set? (row count, column values, NULL handling, DISTINCT behavior, aggregate results)
-2. **Logical safety**: Would it preserve filtering, join conditions, grouping, and ordering?
-3. **Performance safety**: Could it degrade performance? (removing index hints, adding unnecessary subqueries, changing join order)
-
-ONLY include a suggestion if it passes all three checks. If a suggestion would change query semantics because it fixes a genuine bug, include it but set severity to "error" and note the behavioral change in the message.
-
 Return a JSON array of feedback items. Each item must have:
 - "agentType": one of ${JSON.stringify(categories)}
 - "severity": "error" | "warning" | "info" | "success"
-  - Use "error" only for actual bugs, likely runtime failures, or suggestions that intentionally change behavior to fix a bug
+  - Use "error" only for actual bugs or likely runtime failures
   - Use "warning" for things that are probably wrong or will cause problems
   - Use "info" for suggestions and observations
   - Use "success" to acknowledge good practices you notice
 - "title": short title (under 60 chars)
-- "message": detailed explanation (include QA note if the suggestion changes behavior)
-- "suggestion": actionable suggestion that passes QA validation, or null
+- "message": detailed explanation
+- "suggestion": actionable suggestion or null
 - "lineNumber": relevant line number (1-indexed) or null
 
 Guidelines:
@@ -206,7 +199,6 @@ Guidelines:
 - Do not repeat suggestions the user has already accepted
 - If schemas are provided, validate column references, table names, and types
 - If documents are provided, check for consistency with documented conventions
-- NEVER include a suggestion that would silently change query results — either omit it or flag it as a bug fix with severity "error"
 
 SQL:
 \`\`\`sql
@@ -227,6 +219,128 @@ ${sql}
     }
   }
   return [];
+}
+
+/**
+ * QA validation — separate LLM call that independently reviews each
+ * recommendation for semantic, logical, and performance safety.
+ *
+ * This MUST be a separate call from analysis so the reviewer has fresh
+ * context and acts as an independent gate — the model that generated
+ * the recommendations should not be the one deciding if they are safe.
+ */
+export async function llmValidateRecommendations(
+  originalSql: string,
+  recommendations: Array<{
+    agentType: string;
+    severity: string;
+    title: string;
+    message: string;
+    suggestion: string | null;
+    lineNumber: number | null;
+  }>,
+  dialect: string = "Standard SQL"
+): Promise<Array<{
+  agentType: string;
+  severity: string;
+  title: string;
+  message: string;
+  suggestion: string | null;
+  lineNumber: number | null;
+}>> {
+  // Only validate recommendations that have concrete SQL suggestions
+  const withSuggestions = recommendations.filter((r) => r.suggestion && r.suggestion.trim().length > 0);
+  const withoutSuggestions = recommendations.filter((r) => !r.suggestion || r.suggestion.trim().length === 0);
+
+  if (withSuggestions.length === 0) {
+    return recommendations;
+  }
+
+  const openai = getClient();
+
+  const pairs = withSuggestions.map((r, i) => (
+    `### Recommendation ${i + 1}: "${r.title}" [${r.agentType}/${r.severity}]
+Message: ${r.message}
+Suggestion: ${r.suggestion}`
+  )).join("\n\n");
+
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 4096,
+    messages: [
+      {
+        role: "user",
+        content: `You are a rigorous SQL QA reviewer. Your job is to protect the user from recommendations that would silently change query behavior.
+
+Given the original SQL and a set of recommendations with suggestions, evaluate EACH recommendation for:
+
+1. **Semantic equivalence**: Would applying the suggestion change the result set? (row count, column values, NULL handling, DISTINCT behavior, aggregate results)
+2. **Logical equivalence**: Would it change the filtering, join conditions, grouping, or ordering?
+3. **Performance safety**: Could it cause performance degradation? (removing indexes hints, adding unnecessary subqueries, changing join order in problematic ways)
+
+Dialect: ${dialect}
+
+Original SQL:
+\`\`\`sql
+${originalSql}
+\`\`\`
+
+${pairs}
+
+For EACH recommendation (by number), return a JSON array of verdict objects:
+- "index": the recommendation number (1-indexed)
+- "verdict": "safe" | "bug_fix" | "reject"
+  - "safe": The suggestion preserves semantics, logic, and performance. Keep it.
+  - "bug_fix": The suggestion intentionally changes semantics/logic because it fixes a genuine bug. Keep it but it should be flagged for user review.
+  - "reject": The suggestion would silently change semantics, logic, or degrade performance without fixing a bug. Remove it.
+- "reason": brief explanation of why (1-2 sentences)
+
+Return ONLY the JSON array.`,
+      },
+    ],
+  });
+
+  const text = extractText(response);
+
+  let verdicts: Array<{ index: number; verdict: string; reason: string }> = [];
+  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  if (jsonMatch) {
+    try {
+      verdicts = JSON.parse(jsonMatch[0]);
+    } catch {
+      return recommendations;
+    }
+  }
+
+  if (verdicts.length === 0) {
+    return recommendations;
+  }
+
+  const verdictMap = new Map<number, { verdict: string; reason: string }>();
+  for (const v of verdicts) {
+    verdictMap.set(v.index, v);
+  }
+
+  const validated: typeof recommendations = [];
+
+  for (let i = 0; i < withSuggestions.length; i++) {
+    const rec = withSuggestions[i];
+    const v = verdictMap.get(i + 1);
+
+    if (!v || v.verdict === "safe") {
+      validated.push(rec);
+    } else if (v.verdict === "bug_fix") {
+      validated.push({
+        ...rec,
+        severity: "error",
+        title: `[Bug?] ${rec.title}`,
+        message: `${rec.message}\n\nQA Review: This suggestion intentionally changes query behavior because a potential bug was identified. ${v.reason}`,
+      });
+    }
+    // verdict === "reject" → omitted
+  }
+
+  return [...validated, ...withoutSuggestions];
 }
 
 /**
