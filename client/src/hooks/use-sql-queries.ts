@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { api, buildUrl } from "@shared/routes";
 import type { SqlQuery, InsertSqlQuery, UpdateSqlQuery, QueryFeedbackRow, AgentSettings, UserSchema, ParsedTable, SchemaVoiceContext } from "@shared/schema";
 
@@ -95,22 +96,71 @@ export function useQueryFeedback(queryId: number | null) {
   });
 }
 
+export interface AnalysisProgress {
+  step: number;
+  total: number;
+  label: string;
+}
+
 export function useAnalyzeQuery() {
   const queryClient = useQueryClient();
-  return useMutation<QueryFeedbackRow[], Error, { queryId: number; dialect?: string; content?: string }>({
+  const [progress, setProgress] = useState<AnalysisProgress | null>(null);
+
+  const mutation = useMutation<QueryFeedbackRow[], Error, { queryId: number; dialect?: string; content?: string }>({
     mutationFn: async ({ queryId, dialect, content }) => {
+      setProgress({ step: 0, total: 2, label: "Starting analysis" });
+
       const res = await fetch(buildUrl(api.feedback.analyze.path, { id: queryId }), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dialect, content }),
       });
+
       if (!res.ok) throw new Error("Failed to analyze query");
-      return res.json();
+
+      // Read SSE stream for step progress
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let results: QueryFeedbackRow[] = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE events (separated by double newlines)
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop()!;
+
+        for (const part of parts) {
+          const dataLine = part.split("\n").find((l) => l.startsWith("data: "));
+          if (!dataLine) continue;
+          const data = JSON.parse(dataLine.slice(6));
+          if (data.step) {
+            setProgress({ step: data.step, total: data.total, label: data.label });
+          }
+          if (data.done) {
+            results = data.results;
+          }
+          if (data.error) {
+            throw new Error(data.message || "Analysis failed");
+          }
+        }
+      }
+
+      return results;
     },
     onSuccess: (_, { queryId }) => {
+      setProgress(null);
       queryClient.invalidateQueries({ queryKey: ["feedback", queryId] });
     },
+    onError: () => {
+      setProgress(null);
+    },
   });
+
+  return { ...mutation, progress };
 }
 
 export function useResolveFeedback() {

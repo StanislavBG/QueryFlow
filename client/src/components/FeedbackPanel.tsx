@@ -1,4 +1,4 @@
-import { useQueryFeedback, useAnalyzeQuery, useResolveFeedback } from "@/hooks/use-sql-queries";
+import { useQueryFeedback, useAnalyzeQuery, useResolveFeedback, type AnalysisProgress } from "@/hooks/use-sql-queries";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -169,6 +169,73 @@ function FeedbackCard({
   );
 }
 
+function AnalysisStepTracker({ progress }: { progress: AnalysisProgress }) {
+  const steps = [
+    { label: "Analyzing" },
+    { label: "Validating" },
+  ];
+
+  return (
+    <div className="px-3 py-2 border-b border-border bg-muted/30">
+      <div className="flex items-center gap-2">
+        {steps.map((s, i) => {
+          const stepNum = i + 1;
+          const isActive = progress.step === stepNum;
+          const isComplete = progress.step > stepNum;
+          return (
+            <div key={stepNum} className="flex items-center gap-2 flex-1">
+              {i > 0 && (
+                <div
+                  className={`h-px flex-shrink-0 w-4 transition-colors ${
+                    isComplete || isActive ? "bg-primary" : "bg-border"
+                  }`}
+                />
+              )}
+              <div className="flex items-center gap-1.5 min-w-0">
+                <div
+                  className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 text-[9px] font-bold transition-all ${
+                    isComplete
+                      ? "bg-primary text-primary-foreground"
+                      : isActive
+                        ? "bg-primary text-primary-foreground animate-pulse"
+                        : "bg-muted-foreground/20 text-muted-foreground"
+                  }`}
+                >
+                  {isComplete ? (
+                    <Check className="w-2.5 h-2.5" />
+                  ) : (
+                    stepNum
+                  )}
+                </div>
+                <span
+                  className={`text-[10px] truncate ${
+                    isActive
+                      ? "text-primary font-medium"
+                      : isComplete
+                        ? "text-muted-foreground"
+                        : "text-muted-foreground/60"
+                  }`}
+                >
+                  {s.label}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {/* Thin animated progress bar */}
+      <div className="mt-1.5 h-0.5 rounded-full bg-muted-foreground/10 overflow-hidden">
+        <div
+          className="h-full bg-primary rounded-full transition-all duration-500 ease-out"
+          style={{
+            width: progress.step >= 2 ? "100%" : progress.step >= 1 ? "50%" : "0%",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 interface FeedbackPanelProps {
   queryId: number | null;
   dialect?: string;
@@ -180,7 +247,7 @@ interface FeedbackPanelProps {
 
 export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, activeLine, onFeedbackHover }: FeedbackPanelProps) {
   const { data: feedback, isLoading: isFeedbackLoading } = useQueryFeedback(queryId);
-  const analyzeMutation = useAnalyzeQuery();
+  const { progress: analysisProgress, ...analyzeMutation } = useAnalyzeQuery();
   const [filter, setFilter] = useState<string | null>(null);
 
   const handleAnalyze = () => {
@@ -304,14 +371,24 @@ export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, act
         )}
       </div>
 
+      {/* Step tracker while analyzing */}
+      {analyzeMutation.isPending && analysisProgress && (
+        <AnalysisStepTracker progress={analysisProgress} />
+      )}
+
       {/* Feedback list */}
       <ScrollArea className="flex-1">
         <div className="p-3 space-y-2">
-          {isFeedbackLoading || analyzeMutation.isPending ? (
+          {isFeedbackLoading ? (
             <div className="flex flex-col items-center justify-center py-12">
               <Loader2 className="w-5 h-5 animate-spin text-muted-foreground mb-3" />
+              <p className="text-xs text-muted-foreground">Loading...</p>
+            </div>
+          ) : analyzeMutation.isPending ? (
+            <div className="flex flex-col items-center justify-center py-12 px-4">
+              <Loader2 className="w-5 h-5 animate-spin text-primary mb-3" />
               <p className="text-xs text-muted-foreground">
-                {analyzeMutation.isPending ? "Analyzing query..." : "Loading..."}
+                {analysisProgress?.label || "Starting analysis..."}
               </p>
             </div>
           ) : !filteredFeedback || filteredFeedback.length === 0 ? (
