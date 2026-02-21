@@ -223,6 +223,17 @@ export async function registerRoutes(
       });
     }
 
+    // Switch to SSE so the client can track progress across LLM calls
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+
+    const sendEvent = (data: Record<string, unknown>) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
     const { userId: analysisUserId } = getAuth(req);
     logActivity(analysisUserId, "query.analyze", "query", queryId);
 
@@ -245,8 +256,6 @@ export async function registerRoutes(
       : undefined;
 
     // Gather previously resolved feedback as preference signal.
-    // Resolved items represent patterns the user has already reviewed —
-    // the LLM should not flag the same patterns again.
     const existingFeedback = await storage.getFeedbackByQueryId(queryId);
     const resolvedFeedback = existingFeedback
       .filter(f => f.isResolved)
@@ -260,7 +269,8 @@ export async function registerRoutes(
     }
 
     try {
-      // Call 1: Generate recommendations
+      // Step 1: Generate recommendations
+      sendEvent({ step: 1, total: 2, label: "Analyzing query" });
       const llmResults = await llmAnalyzeQuery(sqlContent, {
         dialect,
         schemas: schemaContext,
@@ -269,8 +279,8 @@ export async function registerRoutes(
         enabledCategories,
       });
 
-      // Call 2: Independent QA validation — separate call reviews each
-      // suggestion for semantic/logical/performance safety
+      // Step 2: Independent QA validation
+      sendEvent({ step: 2, total: 2, label: "Validating recommendations" });
       const validated = await llmValidateRecommendations(
         sqlContent,
         llmResults,
@@ -289,10 +299,12 @@ export async function registerRoutes(
       }));
 
       const created = await storage.createFeedbackBatch(feedbackItems);
-      res.json(created);
+      sendEvent({ done: true, results: created });
     } catch (err) {
       console.error("LLM analysis failed:", err);
-      res.status(500).json({ message: "Analysis failed. Please try again." });
+      sendEvent({ error: true, message: "Analysis failed. Please try again." });
+    } finally {
+      res.end();
     }
   });
 
