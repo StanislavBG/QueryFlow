@@ -17,73 +17,51 @@ import {
   Columns3,
   Plus,
   Key,
+  Bug,
+  Copy,
+  Check,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import type { UserSchema } from "@shared/schema";
+import type { UserSchema, ParsedTable, ParsedColumn } from "@shared/schema";
 
 // ---------------------------------------------------------------------------
-// Helpers: extract column type info from parsed DDL
+// Backward-compatibility normalizer for stored tables data.
+// Old format: { name, columns: string[] }
+// New format: { name, columns: Array<{name, type, isPrimaryKey}>, relationships? }
+// This is NOT a parser — it just maps field shapes for old vs. new data.
 // ---------------------------------------------------------------------------
 
-interface ColumnInfo {
-  name: string;
-  type: string;
-  isPrimaryKey: boolean;
-}
-
-function parseColumnsFromDdl(
-  ddl: string,
-  tableName: string,
-  fallbackColumns: string[]
-): ColumnInfo[] {
-  // Try to find CREATE TABLE for this specific table
-  const tablePattern = new RegExp(
-    `CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:["'\`]?${tableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'\`]?)\\s*\\(([^;]*?)\\)`,
-    "is"
-  );
-  const match = ddl.match(tablePattern);
-
-  if (!match) {
-    return fallbackColumns.map((c) => ({ name: c, type: "", isPrimaryKey: false }));
-  }
-
-  const body = match[1];
-  const lines = body.split(",").map((l) => l.trim()).filter(Boolean);
-  const columns: ColumnInfo[] = [];
-
-  for (const line of lines) {
-    // Skip constraints like PRIMARY KEY(...), FOREIGN KEY(...), CONSTRAINT...
-    if (/^\s*(PRIMARY\s+KEY|FOREIGN\s+KEY|CONSTRAINT|UNIQUE|CHECK|INDEX)/i.test(line)) {
-      // Mark columns that appear in PRIMARY KEY(...)
-      const pkMatch = line.match(/PRIMARY\s+KEY\s*\(([^)]+)\)/i);
-      if (pkMatch) {
-        const pkCols = pkMatch[1].split(",").map((c) => c.trim().replace(/["'`]/g, "").toLowerCase());
-        for (const col of columns) {
-          if (pkCols.includes(col.name.toLowerCase())) {
-            col.isPrimaryKey = true;
-          }
-        }
-      }
-      continue;
+export function normalizeTables(tables: unknown): ParsedTable[] {
+  if (!Array.isArray(tables)) return [];
+  return tables.map((t: any) => {
+    if (!t || !t.name || !Array.isArray(t.columns)) {
+      return { name: t?.name || "unknown", columns: [], relationships: [] };
     }
-
-    // Parse: column_name TYPE [constraints...]
-    const colMatch = line.match(/^["'`]?(\w+)["'`]?\s+(\w+(?:\s*\([^)]*\))?)/i);
-    if (colMatch) {
-      const isPk = /PRIMARY\s+KEY/i.test(line) || /SERIAL/i.test(colMatch[2]);
-      columns.push({
-        name: colMatch[1],
-        type: colMatch[2].toUpperCase(),
-        isPrimaryKey: isPk,
-      });
+    // Old format: columns are plain strings
+    if (t.columns.length > 0 && typeof t.columns[0] === "string") {
+      return {
+        name: t.name,
+        columns: t.columns.map((c: string) => ({ name: c, type: "", isPrimaryKey: false })),
+        relationships: [],
+      };
     }
-  }
-
-  if (columns.length === 0) {
-    return fallbackColumns.map((c) => ({ name: c, type: "", isPrimaryKey: false }));
-  }
-
-  return columns;
+    // New format: columns are objects
+    return {
+      name: t.name,
+      columns: t.columns.map((c: any) => ({
+        name: c.name || "",
+        type: c.type || "",
+        isPrimaryKey: !!c.isPrimaryKey,
+      })),
+      relationships: Array.isArray(t.relationships)
+        ? t.relationships.map((r: any) => ({
+            fromCol: r.fromCol || "",
+            toTable: r.toTable || "",
+            toCol: r.toCol || "",
+          }))
+        : [],
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -133,7 +111,7 @@ export function SchemaTreePanel() {
           { name, rawContent: content, fileName: file.name },
           {
             onSuccess: (schema) => {
-              const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+              const tables = normalizeTables(schema.tables);
               const parseError = (schema as Record<string, unknown>).parseError as string | undefined;
               if (tables.length > 0) {
                 toast({ title: "Schema added", description: `"${name}" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
@@ -148,18 +126,6 @@ export function SchemaTreePanel() {
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
-
-  const allTables = useMemo(() => {
-    if (!schemas) return [];
-    return schemas.flatMap((s) =>
-      ((s.tables as Array<{ name: string; columns: string[] }>) || []).map((t) => ({
-        ...t,
-        schemaId: s.id,
-        schemaName: s.name,
-        ddl: s.parsedDdl || "",
-      }))
-    );
-  }, [schemas]);
 
   return (
     <div className="flex flex-col h-full">
@@ -201,7 +167,7 @@ export function SchemaTreePanel() {
             </div>
           ) : (
             schemas.map((schema) => {
-              const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+              const tables = normalizeTables(schema.tables);
               const isExpanded = expandedSchemas.has(schema.id);
 
               return (
@@ -234,7 +200,6 @@ export function SchemaTreePanel() {
                   {isExpanded && tables.map((table, ti) => {
                     const tableKey = `${schema.id}-${ti}`;
                     const isTableExpanded = expandedTables.has(tableKey);
-                    const columns = parseColumnsFromDdl(schema.parsedDdl || "", table.name, table.columns);
 
                     return (
                       <div key={ti} className="ml-3">
@@ -249,13 +214,13 @@ export function SchemaTreePanel() {
                           )}
                           <Table2 className="w-3 h-3 text-emerald-500 flex-shrink-0" />
                           <span className="text-[10px] font-medium truncate">{table.name}</span>
-                          <span className="text-[9px] text-muted-foreground/50 ml-auto">{columns.length}</span>
+                          <span className="text-[9px] text-muted-foreground/50 ml-auto">{table.columns.length}</span>
                         </button>
 
                         {/* Columns under this table */}
                         {isTableExpanded && (
                           <div className="ml-5 border-l border-border/50 pl-2 py-0.5">
-                            {columns.map((col, ci) => (
+                            {table.columns.map((col, ci) => (
                               <div
                                 key={ci}
                                 className="flex items-center gap-1.5 py-[1px] text-[10px]"
@@ -311,7 +276,7 @@ export function SchemaUpload() {
         { name, rawContent: content, fileName: file.name, description: schemaDescription.trim() || undefined },
         {
           onSuccess: (schema) => {
-            const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+            const tables = normalizeTables(schema.tables);
             const parseError = (schema as Record<string, unknown>).parseError as string | undefined;
             if (tables.length > 0) {
               toast({ title: "Schema added", description: `"${name}" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
@@ -358,7 +323,7 @@ export function SchemaUpload() {
         { name, rawContent: text, description: schemaDescription.trim() || undefined },
         {
           onSuccess: (schema) => {
-            const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+            const tables = normalizeTables(schema.tables);
             const parseError = (schema as Record<string, unknown>).parseError as string | undefined;
             if (tables.length > 0) {
               toast({ title: "Schema added", description: `"${name}" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
@@ -457,7 +422,7 @@ export function SchemaUpload() {
 
 interface ERDTable {
   name: string;
-  columns: ColumnInfo[];
+  columns: ParsedColumn[];
   schemaName: string;
 }
 
@@ -468,74 +433,47 @@ interface ERDRelationship {
   toCol: string;
 }
 
-function detectRelationships(tables: ERDTable[], ddl: string): ERDRelationship[] {
-  const relationships: ERDRelationship[] = [];
-
-  // Parse FOREIGN KEY ... REFERENCES from DDL
-  const fkPattern = /FOREIGN\s+KEY\s*\(\s*["'`]?(\w+)["'`]?\s*\)\s*REFERENCES\s+["'`]?(\w+)["'`]?\s*\(\s*["'`]?(\w+)["'`]?\s*\)/gi;
-  const tableNames = new Set(tables.map((t) => t.name.toLowerCase()));
-
-  // Match REFERENCES in the DDL globally
-  let match;
-  while ((match = fkPattern.exec(ddl)) !== null) {
-    const [, fromCol, toTable, toCol] = match;
-    // Find which table this FK belongs to by scanning backwards for CREATE TABLE
-    const before = ddl.substring(0, match.index);
-    const createMatch = Array.from(before.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?/gi));
-    if (createMatch.length > 0) {
-      const fromTable = createMatch[createMatch.length - 1][1];
-      relationships.push({ from: fromTable, fromCol, to: toTable, toCol });
-    }
-  }
-
-  // Also detect by naming convention: columns ending in _id referencing other tables
-  if (relationships.length === 0) {
-    for (const table of tables) {
-      for (const col of table.columns) {
-        if (col.name.toLowerCase().endsWith("_id")) {
-          const refName = col.name.toLowerCase().replace(/_id$/, "");
-          // Check plural and singular forms
-          const candidates = [refName, refName + "s", refName + "es"];
-          for (const candidate of candidates) {
-            if (tableNames.has(candidate) && candidate !== table.name.toLowerCase()) {
-              const targetTable = tables.find((t) => t.name.toLowerCase() === candidate);
-              const targetPk = targetTable?.columns.find((c) => c.isPrimaryKey);
-              relationships.push({
-                from: table.name,
-                fromCol: col.name,
-                to: targetTable?.name || candidate,
-                toCol: targetPk?.name || "id",
-              });
-              break;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return relationships;
-}
-
 export function SchemaERD() {
   const { data: schemas } = useUserSchemas();
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const { tables, relationships, ddl } = useMemo(() => {
     if (!schemas) return { tables: [] as ERDTable[], relationships: [] as ERDRelationship[], ddl: "" };
 
     const allDdl = schemas.map((s) => s.parsedDdl || "").join("\n\n");
-    const allTables: ERDTable[] = schemas.flatMap((s) =>
-      ((s.tables as Array<{ name: string; columns: string[] }>) || []).map((t) => ({
+
+    const allTables: ERDTable[] = schemas.flatMap((s) => {
+      const parsed = normalizeTables(s.tables);
+      return parsed.map((t) => ({
         name: t.name,
-        columns: parseColumnsFromDdl(s.parsedDdl || "", t.name, t.columns),
+        columns: t.columns,
         schemaName: s.name,
-      }))
-    );
+      }));
+    });
 
-    const rels = detectRelationships(allTables, allDdl);
+    // Build relationships from LLM-detected data stored in each table
+    const allRelationships: ERDRelationship[] = schemas.flatMap((s) => {
+      const parsed = normalizeTables(s.tables);
+      return parsed.flatMap((t) =>
+        (t.relationships || []).map((r) => ({
+          from: t.name,
+          fromCol: r.fromCol,
+          to: r.toTable,
+          toCol: r.toCol,
+        }))
+      );
+    });
 
-    return { tables: allTables, relationships: rels, ddl: allDdl };
+    return { tables: allTables, relationships: allRelationships, ddl: allDdl };
   }, [schemas]);
+
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 1500);
+    });
+  };
 
   if (tables.length === 0) {
     return (
@@ -579,7 +517,6 @@ export function SchemaERD() {
               <div className="divide-y divide-border/50">
                 {table.columns.map((col, ci) => {
                   const isFK = outgoing.some((r) => r.fromCol.toLowerCase() === col.name.toLowerCase());
-                  const isReferenced = incoming.some((r) => r.toCol.toLowerCase() === col.name.toLowerCase());
 
                   return (
                     <div
@@ -624,6 +561,137 @@ export function SchemaERD() {
             </div>
           );
         })}
+      </div>
+
+      {/* Debug / Inspect Panel */}
+      <div className="mt-6 border border-border rounded-lg bg-card overflow-hidden">
+        <button
+          onClick={() => setDebugOpen(!debugOpen)}
+          className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-accent/30 transition-colors"
+        >
+          <Bug className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium text-muted-foreground">Schema Debug Inspector</span>
+          <span className="text-[9px] text-muted-foreground/50 ml-1">
+            {schemas?.length || 0} schema{(schemas?.length || 0) !== 1 ? "s" : ""} · {tables.length} table{tables.length !== 1 ? "s" : ""} · {tables.reduce((s, t) => s + t.columns.length, 0)} columns
+          </span>
+          {debugOpen ? (
+            <ChevronDown className="w-3 h-3 text-muted-foreground ml-auto" />
+          ) : (
+            <ChevronRight className="w-3 h-3 text-muted-foreground ml-auto" />
+          )}
+        </button>
+
+        {debugOpen && schemas && (
+          <div className="border-t border-border divide-y divide-border/50">
+            {schemas.map((schema) => {
+              const schemaTables = normalizeTables(schema.tables);
+              const tablesJson = JSON.stringify(schemaTables, null, 2);
+              const rawDdl = schema.parsedDdl || "(no DDL generated)";
+
+              return (
+                <div key={schema.id} className="p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Database className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-xs font-semibold">{schema.name}</span>
+                    <Badge variant="outline" className="text-[9px] h-4">
+                      {schemaTables.length} table{schemaTables.length !== 1 ? "s" : ""}
+                    </Badge>
+                  </div>
+
+                  {/* Per-table column summary */}
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Tables & Column Counts</p>
+                    {schemaTables.length === 0 ? (
+                      <p className="text-[10px] text-destructive">No tables were parsed from this schema input.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {schemaTables.map((t, ti) => {
+                          const pkCount = t.columns.filter((c) => c.isPrimaryKey).length;
+                          const hasTypes = t.columns.some((c) => c.type !== "");
+                          return (
+                            <Badge key={ti} variant="secondary" className="text-[9px] h-5 font-mono gap-1">
+                              {t.name}
+                              <span className="text-muted-foreground">
+                                {t.columns.length}col{t.columns.length !== 1 ? "s" : ""}
+                                {pkCount > 0 && ` · ${pkCount}pk`}
+                                {!hasTypes && " · no types"}
+                              </span>
+                            </Badge>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Tables JSON */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">LLM Tables JSON</p>
+                      <button
+                        onClick={() => copyToClipboard(tablesJson, `json-${schema.id}`)}
+                        className="p-0.5 rounded hover:bg-accent/50 transition-colors"
+                        title="Copy JSON"
+                      >
+                        {copiedField === `json-${schema.id}` ? (
+                          <Check className="w-3 h-3 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-muted-foreground" />
+                        )}
+                      </button>
+                    </div>
+                    <pre className="text-[10px] font-mono bg-muted/50 rounded p-2 max-h-[200px] overflow-auto whitespace-pre-wrap text-muted-foreground">
+                      {tablesJson}
+                    </pre>
+                  </div>
+
+                  {/* Parsed DDL */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Generated DDL</p>
+                      <button
+                        onClick={() => copyToClipboard(rawDdl, `ddl-${schema.id}`)}
+                        className="p-0.5 rounded hover:bg-accent/50 transition-colors"
+                        title="Copy DDL"
+                      >
+                        {copiedField === `ddl-${schema.id}` ? (
+                          <Check className="w-3 h-3 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-muted-foreground" />
+                        )}
+                      </button>
+                    </div>
+                    <pre className="text-[10px] font-mono bg-muted/50 rounded p-2 max-h-[300px] overflow-auto whitespace-pre-wrap text-muted-foreground">
+                      {rawDdl}
+                    </pre>
+                  </div>
+
+                  {/* Raw content preview */}
+                  {schema.rawContent && (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Raw Input (first 500 chars)</p>
+                        <button
+                          onClick={() => copyToClipboard(schema.rawContent || "", `raw-${schema.id}`)}
+                          className="p-0.5 rounded hover:bg-accent/50 transition-colors"
+                          title="Copy raw input"
+                        >
+                          {copiedField === `raw-${schema.id}` ? (
+                            <Check className="w-3 h-3 text-emerald-500" />
+                          ) : (
+                            <Copy className="w-3 h-3 text-muted-foreground" />
+                          )}
+                        </button>
+                      </div>
+                      <pre className="text-[10px] font-mono bg-muted/50 rounded p-2 max-h-[150px] overflow-auto whitespace-pre-wrap text-muted-foreground/70">
+                        {schema.rawContent.slice(0, 500)}{schema.rawContent.length > 500 ? "…" : ""}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
