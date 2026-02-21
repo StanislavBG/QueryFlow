@@ -176,7 +176,11 @@ export async function llmAnalyzeQuery(
         role: "user",
         content: `You are a constructive SQL advisor. Analyze this SQL query and provide actionable feedback. Be non-judgmental and helpful — this is a tool for analysts to improve their work.
 
+Your expertise is limited to pure SQL analysis. Do not speculate about business logic, application-layer behavior, or runtime performance metrics you cannot observe. If you are uncertain about something, say so explicitly in your message rather than guessing. You cannot execute queries or measure actual performance — frame optimization feedback as pattern-based recommendations, not guarantees.
+
 ${contextParts.join("\n")}
+
+Use the detected SQL dialect to inform your analysis. Apply dialect-specific knowledge — for example, MySQL's implicit type coercion, PostgreSQL's array/JSONB operators, SQL Server's TOP vs LIMIT, or T-SQL-specific date functions. If a query uses syntax valid in the detected dialect but non-standard, note it as informational rather than flagging it as an error.
 
 Analyze across these enabled categories:
 ${categoryDescriptions}
@@ -195,10 +199,20 @@ Return a JSON array of feedback items. Each item must have:
 
 Guidelines:
 - Aim for 3-8 items total across all categories — be concise and high-signal
+- Prioritize by impact: list errors and likely bugs first, then warnings, then informational suggestions. Front-load the most critical issues
+- For each feedback item, ensure the message is specific and actionable — reference the exact column, table, clause, or line involved rather than making generic observations
 - Include at least one "success" item if the query has any good practices
 - Do not repeat suggestions the user has already accepted
-- If schemas are provided, validate column references, table names, and types
+- If schemas are provided:
+  - Validate column references, table names, and types against the schema
+  - Use the schema to suppress false positives — do not flag column references as "ambiguous" if the schema resolves them unambiguously to a single table
+  - Do not warn about missing table qualifiers on columns that only exist in one joined table according to the schema
+- If schemas are NOT provided:
+  - Flag genuinely ambiguous column references (e.g., unqualified columns in multi-table JOINs) as warnings
+  - Recommend that the user add schema definitions for more precise analysis
+  - Provide general best-practice recommendations (e.g., always prefix columns with table aliases in JOINs) rather than definitive correctness judgments
 - If documents are provided, check for consistency with documented conventions
+- When generating suggestions, ensure they are pure SQL transformations that preserve the query's semantic intent. Do not suggest changes that would alter the result set, NULL handling, or row count — the downstream QA validator will reject such suggestions
 
 SQL:
 \`\`\`sql
