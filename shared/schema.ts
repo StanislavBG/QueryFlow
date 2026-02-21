@@ -105,6 +105,25 @@ export type AgentSettings = typeof agentSettings.$inferSelect;
 export type InsertAgentSettings = z.infer<typeof insertAgentSettingsSchema>;
 export type UpdateAgentSettings = z.infer<typeof updateAgentSettingsSchema>;
 
+// Structured schema types returned by the LLM and stored in JSONB
+export interface ParsedColumn {
+  name: string;
+  type: string;
+  isPrimaryKey: boolean;
+}
+
+export interface ParsedRelationship {
+  fromCol: string;
+  toTable: string;
+  toCol: string;
+}
+
+export interface ParsedTable {
+  name: string;
+  columns: ParsedColumn[];
+  relationships?: ParsedRelationship[];
+}
+
 // User Schemas table (DDL definitions for validation)
 export const userSchemas = pgTable("user_schemas", {
   id: serial("id").primaryKey(),
@@ -112,7 +131,7 @@ export const userSchemas = pgTable("user_schemas", {
   name: varchar("name", { length: 255 }).notNull(),
   rawContent: text("raw_content").notNull(),
   parsedDdl: text("parsed_ddl").notNull().default(""),
-  tables: jsonb("tables").$type<Array<{ name: string; columns: string[] }>>().default([]),
+  tables: jsonb("tables").$type<ParsedTable[]>().default([]),
   fileName: varchar("file_name", { length: 255 }),
   description: text("description").default(""),
   createdAt: timestamp("created_at").defaultNow(),
