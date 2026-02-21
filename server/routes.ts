@@ -255,11 +255,18 @@ export async function registerRoutes(
       ? docs.map(d => d.content).join("\n\n---\n\n")
       : undefined;
 
-    // Gather previously resolved feedback as preference signal.
+    // Gather full previous feedback state so the LLM can learn from user
+    // decisions (accepted/resolved vs. unresolved/dismissed).
     const existingFeedback = await storage.getFeedbackByQueryId(queryId);
-    const resolvedFeedback = existingFeedback
-      .filter(f => f.isResolved)
-      .map(f => ({ title: f.title, suggestion: f.suggestion }));
+    const previousFeedback = existingFeedback.map(f => ({
+      agentType: f.agentType,
+      severity: f.severity,
+      title: f.title,
+      message: f.message,
+      suggestion: f.suggestion,
+      lineNumber: f.lineNumber,
+      isResolved: f.isResolved,
+    }));
 
     // Clear only unresolved feedback; keep resolved items as a persistent
     // dismissal record so context survives across multiple analyses.
@@ -275,7 +282,7 @@ export async function registerRoutes(
         dialect,
         schemas: schemaContext,
         documents: docContext,
-        acceptedFeedback: resolvedFeedback.length > 0 ? resolvedFeedback : undefined,
+        previousFeedback: previousFeedback.length > 0 ? previousFeedback : undefined,
         enabledCategories,
       });
 
