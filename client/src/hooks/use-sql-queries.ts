@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
-import type { SqlQuery, InsertSqlQuery, UpdateSqlQuery, QueryFeedbackRow, AgentSettings, UserSchema } from "@shared/schema";
+import type { SqlQuery, InsertSqlQuery, UpdateSqlQuery, QueryFeedbackRow, AgentSettings, UserSchema, ParsedTable } from "@shared/schema";
 
 // ─── SQL Queries ─────────────────────────────────────────────────────
 
@@ -272,7 +272,7 @@ export function useCreateUserSchema() {
 
 export function useUpdateUserSchema() {
   const queryClient = useQueryClient();
-  return useMutation<UserSchema, Error, { id: number; data: { name?: string; rawContent?: string; parsedDdl?: string; tables?: Array<{ name: string; columns: string[] }>; description?: string } }>({
+  return useMutation<UserSchema, Error, { id: number; data: { name?: string; rawContent?: string; parsedDdl?: string; tables?: ParsedTable[]; description?: string } }>({
     mutationFn: async ({ id, data }) => {
       const res = await fetch(`/api/schemas/${id}`, {
         method: "PATCH",

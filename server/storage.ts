@@ -28,6 +28,7 @@ import {
   type InsertAppUser,
   type ActivityEvent,
   type InsertActivityEvent,
+  type ParsedTable,
 } from "@shared/schema";
 import { encrypt, decrypt, encryptJson, decryptJson } from "./encryption";
 
@@ -119,7 +120,7 @@ function decryptUserSchema(row: UserSchema): UserSchema {
     parsedDdl: decrypt(row.parsedDdl, aad) ?? "",
     description: decrypt(row.description, aad),
     fileName: decrypt(row.fileName, aad),
-    tables: decryptJson<Array<{ name: string; columns: string[] }>>(row.tables, aad) ?? [],
+    tables: decryptJson<ParsedTable[]>(row.tables, aad) ?? [],
   };
 }
 
@@ -310,7 +311,7 @@ export class DatabaseStorage implements IStorage {
       description: encrypt(schema.description, aad) ?? undefined,
       fileName: encrypt(schema.fileName, aad) ?? undefined,
       tables: schema.tables
-        ? (encryptJson(schema.tables, aad) as unknown as Array<{ name: string; columns: string[] }>)
+        ? (encryptJson(schema.tables, aad) as unknown as ParsedTable[])
         : undefined,
     };
     const [created] = await db.insert(userSchemas).values(encrypted).returning();
