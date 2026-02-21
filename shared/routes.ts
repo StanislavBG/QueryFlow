@@ -8,6 +8,7 @@ import {
   queryFeedback,
   agentSettings,
   updateAgentSettingsSchema,
+  schemaVoiceContext,
 } from './schema';
 
 export const errorSchemas = {
@@ -121,6 +122,47 @@ export const api = {
       input: z.object({ sql: z.string() }),
       responses: {
         200: z.object({ formatted: z.string() }),
+        400: errorSchemas.validation,
+      },
+    },
+  },
+
+  voiceContext: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/schemas/:schemaId/voice-context' as const,
+      responses: {
+        200: z.array(z.custom<typeof schemaVoiceContext.$inferSelect>()),
+      },
+    },
+    upsert: {
+      method: 'POST' as const,
+      path: '/api/schemas/:schemaId/voice-context' as const,
+      input: z.object({
+        targetType: z.enum(['schema', 'table', 'column']),
+        targetTable: z.string().nullable().optional(),
+        targetColumn: z.string().nullable().optional(),
+        transcript: z.string(),
+      }),
+      responses: {
+        200: z.custom<typeof schemaVoiceContext.$inferSelect>(),
+        400: errorSchemas.validation,
+      },
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/schemas/:schemaId/voice-context/:id' as const,
+      responses: {
+        200: z.object({ message: z.string() }),
+        404: errorSchemas.notFound,
+      },
+    },
+    transcribe: {
+      method: 'POST' as const,
+      path: '/api/schemas/:schemaId/voice-context/transcribe' as const,
+      input: z.object({ audio: z.string() }),
+      responses: {
+        200: z.object({ transcript: z.string() }),
         400: errorSchemas.validation,
       },
     },

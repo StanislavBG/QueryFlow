@@ -9,6 +9,7 @@ import {
   chatMessages,
   appUsers,
   activityEvents,
+  schemaVoiceContext,
   type CreateDocumentRequest,
   type DocumentResponse,
   type InsertSqlQuery,
@@ -29,6 +30,8 @@ import {
   type ActivityEvent,
   type InsertActivityEvent,
   type ParsedTable,
+  type SchemaVoiceContext,
+  type InsertSchemaVoiceContext,
 } from "@shared/schema";
 import { encrypt, decrypt, encryptJson, decryptJson } from "./encryption";
 
@@ -81,6 +84,11 @@ export interface IStorage {
   getActivityEvents(opts?: { userId?: string; limit?: number; offset?: number }): Promise<ActivityEvent[]>;
   getActivityCount(userId?: string): Promise<number>;
   getActivityEventsByAction(action: string, since?: Date): Promise<ActivityEvent[]>;
+
+  // Schema Voice Context
+  getSchemaVoiceContexts(schemaId: number): Promise<SchemaVoiceContext[]>;
+  upsertSchemaVoiceContext(data: InsertSchemaVoiceContext): Promise<SchemaVoiceContext>;
+  deleteSchemaVoiceContext(id: number): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +134,10 @@ function decryptUserSchema(row: UserSchema): UserSchema {
 
 function decryptChatMessage(row: ChatMessage): ChatMessage {
   return { ...row, content: decrypt(row.content, row.userId) ?? "" };
+}
+
+function decryptSchemaVoiceContext(row: SchemaVoiceContext): SchemaVoiceContext {
+  return { ...row, transcript: decrypt(row.transcript, row.userId) ?? "" };
 }
 
 export class DatabaseStorage implements IStorage {
@@ -446,6 +458,57 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(activityEvents)
       .where(eq(activityEvents.action, action))
       .orderBy(desc(activityEvents.createdAt));
+  }
+
+  // Schema Voice Context
+  async getSchemaVoiceContexts(schemaId: number): Promise<SchemaVoiceContext[]> {
+    const rows = await db.select().from(schemaVoiceContext)
+      .where(eq(schemaVoiceContext.schemaId, schemaId));
+    return rows.map(decryptSchemaVoiceContext);
+  }
+
+  async upsertSchemaVoiceContext(data: InsertSchemaVoiceContext): Promise<SchemaVoiceContext> {
+    const aad = data.userId;
+    // Find existing row by composite key
+    const conditions = [
+      eq(schemaVoiceContext.schemaId, data.schemaId),
+      eq(schemaVoiceContext.targetType, data.targetType),
+    ];
+    if (data.targetTable) {
+      conditions.push(eq(schemaVoiceContext.targetTable, data.targetTable));
+    } else {
+      conditions.push(isNull(schemaVoiceContext.targetTable));
+    }
+    if (data.targetColumn) {
+      conditions.push(eq(schemaVoiceContext.targetColumn, data.targetColumn));
+    } else {
+      conditions.push(isNull(schemaVoiceContext.targetColumn));
+    }
+
+    const [existing] = await db.select().from(schemaVoiceContext).where(and(...conditions));
+
+    const encryptedTranscript = encrypt(data.transcript ?? "", aad) ?? "";
+
+    if (existing) {
+      const [updated] = await db
+        .update(schemaVoiceContext)
+        .set({ transcript: encryptedTranscript, updatedAt: new Date() })
+        .where(eq(schemaVoiceContext.id, existing.id))
+        .returning();
+      return decryptSchemaVoiceContext(updated);
+    }
+
+    const encrypted = {
+      ...data,
+      transcript: encryptedTranscript,
+    };
+    const [created] = await db.insert(schemaVoiceContext).values(encrypted).returning();
+    return decryptSchemaVoiceContext(created);
+  }
+
+  async deleteSchemaVoiceContext(id: number): Promise<boolean> {
+    const result = await db.delete(schemaVoiceContext).where(eq(schemaVoiceContext.id, id)).returning();
+    return result.length > 0;
   }
 }
 

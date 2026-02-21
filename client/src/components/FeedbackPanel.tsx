@@ -172,19 +172,20 @@ function FeedbackCard({
 interface FeedbackPanelProps {
   queryId: number | null;
   dialect?: string;
+  queryContent?: string;
   hoveredLine?: number | null;
   activeLine?: number | null;
   onFeedbackHover?: (lineNumbers: Set<number>) => void;
 }
 
-export function FeedbackPanel({ queryId, dialect, hoveredLine, activeLine, onFeedbackHover }: FeedbackPanelProps) {
+export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, activeLine, onFeedbackHover }: FeedbackPanelProps) {
   const { data: feedback, isLoading: isFeedbackLoading } = useQueryFeedback(queryId);
   const analyzeMutation = useAnalyzeQuery();
   const [filter, setFilter] = useState<string | null>(null);
 
   const handleAnalyze = () => {
     if (queryId) {
-      analyzeMutation.mutate({ queryId, dialect });
+      analyzeMutation.mutate({ queryId, dialect, content: queryContent });
     }
   };
 
