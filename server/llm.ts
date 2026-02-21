@@ -106,36 +106,49 @@ ${sql}
   return { formatted: text.trim() || sql, notes: "" };
 }
 
-/**
- * Query analysis — single LLM call to generate recommendations.
- *
- * Passes the query, schema context, documents, dialect, and previously
- * accepted feedback. Returns structured feedback items across all
- * enabled categories.
- */
-export async function llmAnalyzeQuery(
-  sql: string,
-  options: {
-    dialect?: string;
-    schemas?: string;
-    documents?: string;
-    acceptedFeedback?: Array<{ title: string; suggestion: string | null }>;
-    enabledCategories?: string[];
-  } = {}
-): Promise<Array<{
+/** Recommendation shape — core fields plus arbitrary extra metadata from the LLM. */
+export type AnalysisRecommendation = Record<string, unknown> & {
   agentType: string;
   severity: string;
   title: string;
   message: string;
   suggestion: string | null;
   lineNumber: number | null;
-}>> {
+};
+
+/**
+ * Query analysis — single LLM call to generate comprehensive recommendations.
+ *
+ * Dynamically detects relevant feedback categories based on the input query.
+ * Returns structured feedback items with before/after SQL comparisons where
+ * applicable. Categories are not limited to a fixed set — the LLM adapts
+ * them based on the query's characteristics.
+ */
+/** Shape for passing full previous feedback state into the analyzer. */
+export interface PreviousFeedbackItem {
+  agentType: string;
+  severity: string;
+  title: string;
+  message: string;
+  suggestion: string | null;
+  lineNumber: number | null;
+  isResolved: boolean;
+}
+
+export async function llmAnalyzeQuery(
+  sql: string,
+  options: {
+    dialect?: string;
+    schemas?: string;
+    documents?: string;
+    previousFeedback?: PreviousFeedbackItem[];
+    enabledCategories?: string[];
+  } = {}
+): Promise<AnalysisRecommendation[]> {
   const openai = getClient();
 
   const dialect = options.dialect || "Standard SQL";
-  const categories = options.enabledCategories || [
-    "structure", "optimization", "error", "style", "formatting", "documentation",
-  ];
+  const enabledCategories = options.enabledCategories || [];
 
   const contextParts: string[] = [];
 
@@ -149,76 +162,103 @@ export async function llmAnalyzeQuery(
     contextParts.push(`\nReference documentation:\n${options.documents}`);
   }
 
-  if (options.acceptedFeedback && options.acceptedFeedback.length > 0) {
-    const accepted = options.acceptedFeedback
-      .map(f => `- ${f.title}${f.suggestion ? `: ${f.suggestion}` : ""}`)
-      .join("\n");
-    contextParts.push(`\nThe user has already accepted these suggestions (do not repeat them, but use them as context for your preferences understanding):\n${accepted}`);
+  // Pass full previous analysis state so the LLM can learn from user decisions
+  if (options.previousFeedback && options.previousFeedback.length > 0) {
+    const accepted = options.previousFeedback.filter(f => f.isResolved);
+    const dismissed = options.previousFeedback.filter(f => !f.isResolved);
+
+    if (accepted.length > 0) {
+      const acceptedText = accepted
+        .map(f => `- [${f.agentType}/${f.severity}] "${f.title}": ${f.message}${f.suggestion ? ` → Suggestion: ${f.suggestion}` : ""}`)
+        .join("\n");
+      contextParts.push(`\n## Previously Accepted Feedback (user agreed with these — do not repeat the same findings, but use them to understand user preferences and patterns they care about):\n${acceptedText}`);
+    }
+
+    if (dismissed.length > 0) {
+      const dismissedText = dismissed
+        .map(f => `- [${f.agentType}/${f.severity}] "${f.title}": ${f.message}${f.suggestion ? ` → Suggestion: ${f.suggestion}` : ""}`)
+        .join("\n");
+      contextParts.push(`\n## Previous Unresolved Feedback (from last analysis run — avoid repeating these exact findings unless the underlying issue persists in the current SQL; use them as context to provide deeper or more refined analysis):\n${dismissedText}`);
+    }
   }
 
-  const categoryDescriptions = categories.map(c => {
-    switch (c) {
-      case "structure": return "- **structure**: Query structure, nesting depth, complexity, readability, use of CTEs";
-      case "optimization": return "- **optimization**: Performance patterns (SELECT *, missing WHERE, index usage, N+1 patterns, join efficiency)";
-      case "error": return "- **error**: Potential SQL bugs, typos, unmatched parentheses, ambiguous references, type mismatches";
-      case "style": return "- **style**: Keyword casing consistency, indentation, comma placement, naming conventions";
-      case "formatting": return "- **formatting**: Whitespace, line breaks, alignment, overall visual layout and readability";
-      case "documentation": return "- **documentation**: Comments, query purpose clarity, documentation headers, maintainability for team environments";
-      default: return "";
-    }
-  }).filter(Boolean).join("\n");
+  // Build prioritization guidance from enabled categories
+  const prioritySection = enabledCategories.length > 0
+    ? `\nThe user has prioritized the following analysis areas (emphasize these in your output, but still report critical findings in other areas):\n${enabledCategories.map(c => `- ${c}`).join("\n")}`
+    : "";
 
   const response = await openai.chat.completions.create({
     model: MODEL,
-    max_tokens: 4096,
+    max_tokens: 8192,
     messages: [
       {
         role: "user",
-        content: `You are a constructive SQL advisor. Analyze this SQL query and provide actionable feedback. Be non-judgmental and helpful — this is a tool for analysts to improve their work.
+        content: `You are an expert SQL analyst providing thorough, structured, actionable feedback. Your goal is to deliver a comprehensive review covering every significant aspect of the input — from performance and correctness to security, compliance, schema design, and alternative approaches. Be constructive and non-judgmental.
 
-Your expertise is limited to pure SQL analysis. Do not speculate about business logic, application-layer behavior, or runtime performance metrics you cannot observe. If you are uncertain about something, say so explicitly in your message rather than guessing. You cannot execute queries or measure actual performance — frame optimization feedback as pattern-based recommendations, not guarantees.
+Your expertise is limited to pure SQL analysis. Do not speculate about business logic, application-layer behavior, or runtime performance metrics you cannot observe. If you are uncertain, say so explicitly rather than guessing. Frame optimization feedback as pattern-based recommendations, not guarantees.
 
 ${contextParts.join("\n")}
+${prioritySection}
 
-Use the detected SQL dialect to inform your analysis. Apply dialect-specific knowledge — for example, MySQL's implicit type coercion, PostgreSQL's array/JSONB operators, SQL Server's TOP vs LIMIT, or T-SQL-specific date functions. If a query uses syntax valid in the detected dialect but non-standard, note it as informational rather than flagging it as an error.
+## Dialect Awareness
+Use the detected SQL dialect (${dialect}) throughout your analysis. Apply engine-specific knowledge:
+- **MySQL**: implicit type coercion, lack of full outer join, index hints, optimizer behavior, specific function variants (IFNULL vs COALESCE)
+- **PostgreSQL**: array/JSONB operators, CTEs as optimization fences (pre-v12), lateral joins, window function nuances
+- **SQL Server / T-SQL**: TOP vs LIMIT, CROSS APPLY/OUTER APPLY, date functions (DATEADD/DATEDIFF), NOLOCK hints, SET NOCOUNT
+- **Oracle**: ROWNUM vs FETCH FIRST, CONNECT BY, analytic functions, PL/SQL specifics
+If syntax is valid in the detected dialect but non-standard, note it as informational rather than flagging it as an error.
 
-The input may be a single query, a multi-statement batch, a stored procedure, or a collection of disconnected statements. Adapt your analysis accordingly:
-- For multi-statement inputs, analyze cross-statement dependencies — look for issues like temp tables created but never dropped, variables declared but unused, inconsistent transaction handling, or cursor mismanagement
-- For stored procedures, evaluate parameter usage, control flow logic (IF/WHILE/TRY-CATCH), and whether error handling is adequate
-- For disconnected or unrelated statements in the same input, analyze each independently but also flag any recurring patterns or shared issues across them (e.g., all statements use SELECT *, or none use table aliases)
-- Use line numbers to anchor feedback to the specific statement within the input
+## Input Handling
+The input may be a single query, a multi-statement batch, a stored procedure, or disconnected statements. Adapt accordingly:
+- For multi-statement inputs: analyze cross-statement dependencies — temp tables created but never dropped, variables declared but unused, inconsistent transaction handling, cursor mismanagement
+- For stored procedures: evaluate parameter usage, control flow (IF/WHILE/TRY-CATCH), error handling adequacy, transaction scope
+- For disconnected statements: analyze each independently but flag shared anti-patterns
+- Use line numbers to anchor every feedback item to the specific location in the input
 
-Analyze across these enabled categories:
-${categoryDescriptions}
+## Dynamic Category Assignment
+Dynamically assign an agentType to each finding based on what you detect. Common categories include:
+- **structure** — Query structure, nesting depth, complexity, readability, CTE usage
+- **optimization** — Performance patterns (SELECT *, missing WHERE, index usage, N+1, join efficiency, correlated subqueries)
+- **error** — Bugs, typos, unmatched parentheses, ambiguous references, type mismatches, logic errors
+- **style** — Keyword casing consistency, naming conventions, alias consistency
+- **formatting** — Whitespace, line breaks, alignment, visual layout
+- **documentation** — Comments, query purpose clarity, maintainability
+- **security** — SQL injection vectors, excessive permissions, dynamic SQL risks, unparameterized inputs
+- **compliance** — Data privacy patterns (selecting PII without filters), audit trail gaps, retention policy concerns
+- **schema_design** — Data type mismatches, missing constraints, denormalization issues, index recommendations
+- **alternative_design** — Fundamentally different query approaches (e.g., window functions instead of self-joins, recursive CTEs, MERGE instead of INSERT+UPDATE)
 
+You are NOT limited to these. If the query exhibits issues in another domain, create an appropriate agentType slug (lowercase, snake_case).
+
+## Output Format
 Return a JSON array of feedback items. Each item must have:
-- "agentType": one of ${JSON.stringify(categories)}
+- "agentType": string — dynamic category slug (see above)
 - "severity": "error" | "warning" | "info" | "success"
-  - Use "error" only for actual bugs or likely runtime failures
-  - Use "warning" for things that are probably wrong or will cause problems
-  - Use "info" for suggestions and observations
-  - Use "success" to acknowledge good practices you notice
-- "title": short title (under 60 chars)
-- "message": detailed explanation
-- "suggestion": actionable suggestion or null
-- "lineNumber": relevant line number (1-indexed) or null
+  - "error" — actual bugs, likely runtime failures, security vulnerabilities
+  - "warning" — probable issues, performance risks, practices that will cause problems
+  - "info" — suggestions, observations, alternative approaches
+  - "success" — acknowledgment of good practices
+- "title": string — short, specific title (under 60 chars)
+- "message": string — detailed explanation referencing exact tables, columns, clauses, and line numbers
+- "suggestion": string | null — actionable text explanation of the recommended change
+- "beforeSql": string | null — the relevant SQL snippet from the original query that would change (extract the minimal meaningful fragment)
+- "afterSql": string | null — the rewritten SQL snippet showing the recommended change
+- "lineNumber": number | null — 1-indexed line number in the original input
 
-Guidelines:
-- Aim for 3-8 items for a single query. For multi-statement batches or stored procedures, scale up proportionally (up to 15 items) but stay high-signal — do not pad with low-value observations
-- Prioritize by impact: list errors and likely bugs first, then warnings, then informational suggestions. Front-load the most critical issues
-- For each feedback item, ensure the message is specific and actionable — reference the exact column, table, clause, or line involved rather than making generic observations
-- Include at least one "success" item if the query has any good practices
-- Do not repeat suggestions the user has already accepted
-- If schemas are provided:
-  - Validate column references, table names, and types against the schema
-  - Use the schema to suppress false positives — do not flag column references as "ambiguous" if the schema resolves them unambiguously to a single table
-  - Do not warn about missing table qualifiers on columns that only exist in one joined table according to the schema
-- If schemas are NOT provided:
-  - Flag genuinely ambiguous column references (e.g., unqualified columns in multi-table JOINs) as warnings
-  - Recommend that the user add schema definitions for more precise analysis
-  - Provide general best-practice recommendations (e.g., always prefix columns with table aliases in JOINs) rather than definitive correctness judgments
-- If documents are provided, check for consistency with documented conventions
-- When generating suggestions, ensure they are pure SQL transformations that preserve the query's semantic intent. Do not suggest changes that would alter the result set, NULL handling, or row count — the downstream QA validator will reject such suggestions
+## Guidelines
+- **Be thorough**: There is no hard cap on findings. Report every significant issue. For a simple query, 3-8 items is typical. For complex stored procedures or multi-statement batches, produce as many findings as warranted — 15, 20, or more if the input justifies it. Never pad with low-value observations; every item must be high-signal.
+- **Priority ordering**: Return items in descending order of importance. Errors and bugs first, then warnings, then informational items. Within the same severity, front-load the highest-impact findings.
+- **Before/after SQL**: For every suggestion that modifies SQL, include "beforeSql" (the original fragment) and "afterSql" (the improved fragment). Keep snippets minimal — only the relevant clause or statement, not the entire query. Set both to null for observations with no concrete SQL change.
+- **Specificity**: Reference exact column names, table names, clauses, and line numbers. Never make generic statements like "consider optimizing this query."
+- **At least one success**: If the query has any good practices, acknowledge them.
+- **Do not repeat**: Skip suggestions the user has already accepted.
+- **Schema-aware analysis**:
+  - If schemas are provided: validate column references, types, and joins against the schema. Suppress false positives — do not flag columns as ambiguous if the schema resolves them.
+  - If schemas are NOT provided: flag genuinely ambiguous references as warnings. Recommend adding schema definitions for more precise analysis.
+- **Document-aware analysis**: If documents are provided, check for consistency with documented conventions.
+- **Semantic safety**: When generating afterSql, ensure it preserves the query's semantic intent. Do not suggest changes that alter the result set, NULL handling, or row count — the downstream QA validator will reject such changes.
+- **Alternative designs**: When you see an opportunity for a fundamentally better approach (not just a tweak), include it as an "alternative_design" item with full before/after SQL and explanation of trade-offs.
+- **Security and compliance**: Actively look for SQL injection risks, excessive data exposure, missing access controls, PII handling, and audit gaps. Flag these even if not in the prioritized categories.
 
 SQL:
 \`\`\`sql
@@ -233,7 +273,17 @@ ${sql}
   const jsonMatch = text.match(/\[[\s\S]*\]/);
   if (jsonMatch) {
     try {
-      return JSON.parse(jsonMatch[0]);
+      const items = JSON.parse(jsonMatch[0]);
+      // Normalize: ensure core fields exist, preserve all extra LLM output
+      return items.map((item: Record<string, unknown>) => ({
+        ...item,
+        agentType: (item.agentType as string) || "structure",
+        severity: (item.severity as string) || "info",
+        title: (item.title as string) || "Untitled",
+        message: (item.message as string) || "",
+        suggestion: (item.suggestion as string) ?? null,
+        lineNumber: (item.lineNumber as number) ?? null,
+      })) as AnalysisRecommendation[];
     } catch {
       return [];
     }
@@ -251,23 +301,9 @@ ${sql}
  */
 export async function llmValidateRecommendations(
   originalSql: string,
-  recommendations: Array<{
-    agentType: string;
-    severity: string;
-    title: string;
-    message: string;
-    suggestion: string | null;
-    lineNumber: number | null;
-  }>,
+  recommendations: AnalysisRecommendation[],
   dialect: string = "Standard SQL"
-): Promise<Array<{
-  agentType: string;
-  severity: string;
-  title: string;
-  message: string;
-  suggestion: string | null;
-  lineNumber: number | null;
-}>> {
+): Promise<AnalysisRecommendation[]> {
   // Only validate recommendations that have concrete SQL suggestions
   const withSuggestions = recommendations.filter((r) => r.suggestion && r.suggestion.trim().length > 0);
   const withoutSuggestions = recommendations.filter((r) => !r.suggestion || r.suggestion.trim().length === 0);
