@@ -354,6 +354,120 @@ export async function registerRoutes(
     res.json({ success: true });
   });
 
+  // ─── Analysis Context Preview ──────────────────────────────────────
+  // Returns the exact context blocks that would be sent to llmAnalyzeQuery,
+  // without running the LLM. Each block is a { key, label, content } object.
+  // New block types (e.g. Metrics, Logs) appear automatically when data exists.
+
+  app.post("/api/sql-queries/:id/analysis-context", async (req, res) => {
+    const queryId = parseInt(req.params.id, 10);
+    if (isNaN(queryId)) {
+      return res.status(400).json({ message: "Invalid query ID" });
+    }
+
+    const query = await storage.getSqlQuery(queryId);
+    if (!query) {
+      return res.status(404).json({ message: "Query not found" });
+    }
+
+    const sqlContent = (req.body.content || query.draftContent || query.content || "").toString();
+    const dialect = req.body.dialect || "Standard SQL";
+
+    // Assemble all the same context the analyze pipeline would use
+    const blocks: Array<{ key: string; label: string; content: string; itemCount?: number }> = [];
+
+    // 1. Query
+    blocks.push({
+      key: "query",
+      label: "Query",
+      content: sqlContent || "(empty)",
+    });
+
+    // 2. Dialect
+    blocks.push({
+      key: "dialect",
+      label: "Dialect",
+      content: dialect,
+    });
+
+    // 3. Enabled categories
+    const allSettings = await storage.getAgentSettings();
+    const enabledCategories = allSettings.length > 0
+      ? allSettings.filter(s => s.enabled).map(s => s.agentType)
+      : [...ALL_CATEGORIES];
+    blocks.push({
+      key: "categories",
+      label: "Enabled Categories",
+      content: enabledCategories.join(", "),
+      itemCount: enabledCategories.length,
+    });
+
+    // 4. Schemas
+    const schemas = await storage.getUserSchemas();
+    const schemaContext = await buildSchemaContext(schemas);
+    if (schemaContext) {
+      blocks.push({
+        key: "schemas",
+        label: "Schema Definitions",
+        content: schemaContext,
+        itemCount: schemas.length,
+      });
+    }
+
+    // 5. Documents
+    const docs = await storage.getDocuments();
+    if (docs.length > 0) {
+      blocks.push({
+        key: "documents",
+        label: "Reference Documents",
+        content: docs.map(d => d.content).join("\n\n---\n\n"),
+        itemCount: docs.length,
+      });
+    }
+
+    // 6. Previous feedback (accepted / dismissed / unresolved)
+    const existingFeedback = await storage.getFeedbackByQueryId(queryId);
+    const accepted = existingFeedback.filter(f => f.isResolved && !f.isDismissed);
+    const dismissed = existingFeedback.filter(f => f.isResolved && f.isDismissed);
+    const unresolved = existingFeedback.filter(f => !f.isResolved);
+
+    if (accepted.length > 0) {
+      blocks.push({
+        key: "feedback_accepted",
+        label: "Accepted Feedback",
+        content: accepted.map(f => `[${f.agentType}/${f.severity}] ${f.title}: ${f.message}`).join("\n\n"),
+        itemCount: accepted.length,
+      });
+    }
+
+    if (dismissed.length > 0) {
+      blocks.push({
+        key: "feedback_dismissed",
+        label: "Dismissed Feedback",
+        content: dismissed.map(f => `[${f.agentType}/${f.severity}] ${f.title}: ${f.message}`).join("\n\n"),
+        itemCount: dismissed.length,
+      });
+    }
+
+    if (unresolved.length > 0) {
+      blocks.push({
+        key: "feedback_unresolved",
+        label: "Unresolved Feedback",
+        content: unresolved.map(f => `[${f.agentType}/${f.severity}] ${f.title}: ${f.message}`).join("\n\n"),
+        itemCount: unresolved.length,
+      });
+    }
+
+    // 7. LLM status
+    blocks.push({
+      key: "llm_status",
+      label: "LLM Status",
+      content: isLLMConfigured() ? "Configured" : "Not configured — set AI_INTEGRATIONS_OPENAI_API_KEY",
+    });
+
+    res.json(blocks);
+  });
+
   // ─── Format Route (LLM-powered with local fallback) ────────────────
 
   app.post(api.format.formatQuery.path, async (req, res) => {

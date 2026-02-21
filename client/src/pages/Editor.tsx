@@ -4,6 +4,7 @@ import { QueryDocumentList } from "@/components/QueryDocumentList";
 import { SqlEditor } from "@/components/SqlEditor";
 import { FeedbackPanel } from "@/components/FeedbackPanel";
 import { SettingsDialog } from "@/components/SettingsDialog";
+import { ContextPlanDialog } from "@/components/ContextPlanDialog";
 import { AskModule } from "@/components/AskModule";
 import { SchemaTreePanel, normalizeTables } from "@/components/SchemaModule";
 import type { SchemaSelection } from "@/components/SchemaModule";
@@ -305,6 +306,21 @@ export default function Editor() {
             </TooltipTrigger>
             <TooltipContent side="bottom">
               <p className="text-xs">{dark ? "Switch to light mode" : "Switch to dark mode"}</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span>
+                <ContextPlanDialog
+                  queryId={selectedQueryId}
+                  dialect={detectedDialect}
+                  queryContent={resolvedQueryContent}
+                />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p className="text-xs">Analysis Context Plan</p>
             </TooltipContent>
           </Tooltip>
 
