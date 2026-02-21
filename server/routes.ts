@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
 import { formatSQL } from "./formatter";
-import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema } from "./llm";
+import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmAskQuestion, llmParseSchema } from "./llm";
 import { requireAdmin, resolveAppUser, logActivity } from "./auth";
 
 // All available analysis categories
@@ -40,7 +40,7 @@ export const CATEGORY_DESCRIPTIONS: Record<AnalysisCategory, { name: string; des
   },
 };
 
-import type { UserSchema } from "@shared/schema";
+import type { UserSchema, ParsedTable, ParsedColumn, ParsedRelationship } from "@shared/schema";
 
 /** Build schema context string for LLM prompts, including descriptions as SQL comments. */
 function buildSchemaContext(schemas: UserSchema[]): string | undefined {
@@ -237,7 +237,7 @@ export async function registerRoutes(
     }
 
     try {
-      // Step 1: Generate recommendations
+      // Single LLM call: analyze + self-validate in one context window
       const llmResults = await llmAnalyzeQuery(query.content, {
         dialect,
         schemas: schemaContext,
@@ -246,16 +246,7 @@ export async function registerRoutes(
         enabledCategories,
       });
 
-      // Step 2: QA validation – remove suggestions that would silently
-      // change semantics, logic, or degrade performance. Bug-fix
-      // suggestions are kept but flagged for user review.
-      const validated = await llmValidateRecommendations(
-        query.content,
-        llmResults,
-        dialect
-      );
-
-      const feedbackItems = validated.map(r => ({
+      const feedbackItems = llmResults.map(r => ({
         queryId,
         agentType: r.agentType,
         severity: r.severity,
@@ -425,7 +416,7 @@ export async function registerRoutes(
       const { userId } = getAuth(req);
 
       let parsedDdl = input.rawContent;
-      let tables: Array<{ name: string; columns: string[] }> = [];
+      let tables: ParsedTable[] = [];
       let parseError: string | undefined;
 
       // Always use LLM for schema parsing (per CLAUDE.md: all parsers must be LLM-based)
@@ -472,7 +463,19 @@ export async function registerRoutes(
         name: z.string().min(1).optional(),
         rawContent: z.string().optional(),
         parsedDdl: z.string().optional(),
-        tables: z.array(z.object({ name: z.string(), columns: z.array(z.string()) })).optional(),
+        tables: z.array(z.object({
+          name: z.string(),
+          columns: z.array(z.object({
+            name: z.string(),
+            type: z.string(),
+            isPrimaryKey: z.boolean(),
+          })),
+          relationships: z.array(z.object({
+            fromCol: z.string(),
+            toTable: z.string(),
+            toCol: z.string(),
+          })).optional(),
+        })).optional(),
         description: z.string().optional(),
       }).parse(req.body);
 

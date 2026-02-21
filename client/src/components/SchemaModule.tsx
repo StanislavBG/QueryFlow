@@ -22,93 +22,46 @@ import {
   Check,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import type { UserSchema } from "@shared/schema";
+import type { UserSchema, ParsedTable, ParsedColumn } from "@shared/schema";
 
 // ---------------------------------------------------------------------------
-// Helpers: extract column type info from parsed DDL
+// Backward-compatibility normalizer for stored tables data.
+// Old format: { name, columns: string[] }
+// New format: { name, columns: Array<{name, type, isPrimaryKey}>, relationships? }
+// This is NOT a parser — it just maps field shapes for old vs. new data.
 // ---------------------------------------------------------------------------
 
-interface ColumnInfo {
-  name: string;
-  type: string;
-  isPrimaryKey: boolean;
-}
-
-/**
- * Split a CREATE TABLE body into column/constraint definitions.
- * Handles commas inside parentheses (e.g. decimal(12,7)) correctly.
- */
-function splitColumnDefs(body: string): string[] {
-  const parts: string[] = [];
-  let current = "";
-  let depth = 0;
-  for (const ch of body) {
-    if (ch === "(") depth++;
-    else if (ch === ")") depth--;
-    if (ch === "," && depth === 0) {
-      parts.push(current.trim());
-      current = "";
-    } else {
-      current += ch;
+export function normalizeTables(tables: unknown): ParsedTable[] {
+  if (!Array.isArray(tables)) return [];
+  return tables.map((t: any) => {
+    if (!t || !t.name || !Array.isArray(t.columns)) {
+      return { name: t?.name || "unknown", columns: [], relationships: [] };
     }
-  }
-  if (current.trim()) parts.push(current.trim());
-  return parts.filter(Boolean);
-}
-
-function parseColumnsFromDdl(
-  ddl: string,
-  tableName: string,
-  fallbackColumns: string[]
-): ColumnInfo[] {
-  // Try to find CREATE TABLE for this specific table
-  const tablePattern = new RegExp(
-    `CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:["'\`]?${tableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'\`]?)\\s*\\(([^;]*?)\\)`,
-    "is"
-  );
-  const match = ddl.match(tablePattern);
-
-  if (!match) {
-    return fallbackColumns.map((c) => ({ name: c, type: "", isPrimaryKey: false }));
-  }
-
-  const body = match[1];
-  const lines = splitColumnDefs(body);
-  const columns: ColumnInfo[] = [];
-
-  for (const line of lines) {
-    // Skip constraints like PRIMARY KEY(...), FOREIGN KEY(...), CONSTRAINT...
-    if (/^\s*(PRIMARY\s+KEY|FOREIGN\s+KEY|CONSTRAINT|UNIQUE|CHECK|INDEX)/i.test(line)) {
-      // Mark columns that appear in PRIMARY KEY(...)
-      const pkMatch = line.match(/PRIMARY\s+KEY\s*\(([^)]+)\)/i);
-      if (pkMatch) {
-        const pkCols = pkMatch[1].split(",").map((c) => c.trim().replace(/["'`]/g, "").toLowerCase());
-        for (const col of columns) {
-          if (pkCols.includes(col.name.toLowerCase())) {
-            col.isPrimaryKey = true;
-          }
-        }
-      }
-      continue;
+    // Old format: columns are plain strings
+    if (t.columns.length > 0 && typeof t.columns[0] === "string") {
+      return {
+        name: t.name,
+        columns: t.columns.map((c: string) => ({ name: c, type: "", isPrimaryKey: false })),
+        relationships: [],
+      };
     }
-
-    // Parse: column_name TYPE [constraints...]
-    const colMatch = line.match(/^["'`]?(\w+)["'`]?\s+(\w+(?:\s*\([^)]*\))?)/i);
-    if (colMatch) {
-      const isPk = /PRIMARY\s+KEY/i.test(line) || /SERIAL/i.test(colMatch[2]);
-      columns.push({
-        name: colMatch[1],
-        type: colMatch[2].toUpperCase(),
-        isPrimaryKey: isPk,
-      });
-    }
-  }
-
-  if (columns.length === 0) {
-    return fallbackColumns.map((c) => ({ name: c, type: "", isPrimaryKey: false }));
-  }
-
-  return columns;
+    // New format: columns are objects
+    return {
+      name: t.name,
+      columns: t.columns.map((c: any) => ({
+        name: c.name || "",
+        type: c.type || "",
+        isPrimaryKey: !!c.isPrimaryKey,
+      })),
+      relationships: Array.isArray(t.relationships)
+        ? t.relationships.map((r: any) => ({
+            fromCol: r.fromCol || "",
+            toTable: r.toTable || "",
+            toCol: r.toCol || "",
+          }))
+        : [],
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -158,7 +111,7 @@ export function SchemaTreePanel() {
           { name, rawContent: content, fileName: file.name },
           {
             onSuccess: (schema) => {
-              const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+              const tables = normalizeTables(schema.tables);
               const parseError = (schema as Record<string, unknown>).parseError as string | undefined;
               if (tables.length > 0) {
                 toast({ title: "Schema added", description: `"${name}" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
@@ -173,18 +126,6 @@ export function SchemaTreePanel() {
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
-
-  const allTables = useMemo(() => {
-    if (!schemas) return [];
-    return schemas.flatMap((s) =>
-      ((s.tables as Array<{ name: string; columns: string[] }>) || []).map((t) => ({
-        ...t,
-        schemaId: s.id,
-        schemaName: s.name,
-        ddl: s.parsedDdl || "",
-      }))
-    );
-  }, [schemas]);
 
   return (
     <div className="flex flex-col h-full">
@@ -226,7 +167,7 @@ export function SchemaTreePanel() {
             </div>
           ) : (
             schemas.map((schema) => {
-              const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+              const tables = normalizeTables(schema.tables);
               const isExpanded = expandedSchemas.has(schema.id);
 
               return (
@@ -259,7 +200,6 @@ export function SchemaTreePanel() {
                   {isExpanded && tables.map((table, ti) => {
                     const tableKey = `${schema.id}-${ti}`;
                     const isTableExpanded = expandedTables.has(tableKey);
-                    const columns = parseColumnsFromDdl(schema.parsedDdl || "", table.name, table.columns);
 
                     return (
                       <div key={ti} className="ml-3">
@@ -274,13 +214,13 @@ export function SchemaTreePanel() {
                           )}
                           <Table2 className="w-3 h-3 text-emerald-500 flex-shrink-0" />
                           <span className="text-[10px] font-medium truncate">{table.name}</span>
-                          <span className="text-[9px] text-muted-foreground/50 ml-auto">{columns.length}</span>
+                          <span className="text-[9px] text-muted-foreground/50 ml-auto">{table.columns.length}</span>
                         </button>
 
                         {/* Columns under this table */}
                         {isTableExpanded && (
                           <div className="ml-5 border-l border-border/50 pl-2 py-0.5">
-                            {columns.map((col, ci) => (
+                            {table.columns.map((col, ci) => (
                               <div
                                 key={ci}
                                 className="flex items-center gap-1.5 py-[1px] text-[10px]"
@@ -336,7 +276,7 @@ export function SchemaUpload() {
         { name, rawContent: content, fileName: file.name, description: schemaDescription.trim() || undefined },
         {
           onSuccess: (schema) => {
-            const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+            const tables = normalizeTables(schema.tables);
             const parseError = (schema as Record<string, unknown>).parseError as string | undefined;
             if (tables.length > 0) {
               toast({ title: "Schema added", description: `"${name}" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
@@ -383,7 +323,7 @@ export function SchemaUpload() {
         { name, rawContent: text, description: schemaDescription.trim() || undefined },
         {
           onSuccess: (schema) => {
-            const tables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+            const tables = normalizeTables(schema.tables);
             const parseError = (schema as Record<string, unknown>).parseError as string | undefined;
             if (tables.length > 0) {
               toast({ title: "Schema added", description: `"${name}" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
@@ -482,7 +422,7 @@ export function SchemaUpload() {
 
 interface ERDTable {
   name: string;
-  columns: ColumnInfo[];
+  columns: ParsedColumn[];
   schemaName: string;
 }
 
@@ -491,55 +431,6 @@ interface ERDRelationship {
   fromCol: string;
   to: string;
   toCol: string;
-}
-
-function detectRelationships(tables: ERDTable[], ddl: string): ERDRelationship[] {
-  const relationships: ERDRelationship[] = [];
-
-  // Parse FOREIGN KEY ... REFERENCES from DDL
-  const fkPattern = /FOREIGN\s+KEY\s*\(\s*["'`]?(\w+)["'`]?\s*\)\s*REFERENCES\s+["'`]?(\w+)["'`]?\s*\(\s*["'`]?(\w+)["'`]?\s*\)/gi;
-  const tableNames = new Set(tables.map((t) => t.name.toLowerCase()));
-
-  // Match REFERENCES in the DDL globally
-  let match;
-  while ((match = fkPattern.exec(ddl)) !== null) {
-    const [, fromCol, toTable, toCol] = match;
-    // Find which table this FK belongs to by scanning backwards for CREATE TABLE
-    const before = ddl.substring(0, match.index);
-    const createMatch = Array.from(before.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?/gi));
-    if (createMatch.length > 0) {
-      const fromTable = createMatch[createMatch.length - 1][1];
-      relationships.push({ from: fromTable, fromCol, to: toTable, toCol });
-    }
-  }
-
-  // Also detect by naming convention: columns ending in _id referencing other tables
-  if (relationships.length === 0) {
-    for (const table of tables) {
-      for (const col of table.columns) {
-        if (col.name.toLowerCase().endsWith("_id")) {
-          const refName = col.name.toLowerCase().replace(/_id$/, "");
-          // Check plural and singular forms
-          const candidates = [refName, refName + "s", refName + "es"];
-          for (const candidate of candidates) {
-            if (tableNames.has(candidate) && candidate !== table.name.toLowerCase()) {
-              const targetTable = tables.find((t) => t.name.toLowerCase() === candidate);
-              const targetPk = targetTable?.columns.find((c) => c.isPrimaryKey);
-              relationships.push({
-                from: table.name,
-                fromCol: col.name,
-                to: targetTable?.name || candidate,
-                toCol: targetPk?.name || "id",
-              });
-              break;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return relationships;
 }
 
 export function SchemaERD() {
@@ -551,17 +442,30 @@ export function SchemaERD() {
     if (!schemas) return { tables: [] as ERDTable[], relationships: [] as ERDRelationship[], ddl: "" };
 
     const allDdl = schemas.map((s) => s.parsedDdl || "").join("\n\n");
-    const allTables: ERDTable[] = schemas.flatMap((s) =>
-      ((s.tables as Array<{ name: string; columns: string[] }>) || []).map((t) => ({
+
+    const allTables: ERDTable[] = schemas.flatMap((s) => {
+      const parsed = normalizeTables(s.tables);
+      return parsed.map((t) => ({
         name: t.name,
-        columns: parseColumnsFromDdl(s.parsedDdl || "", t.name, t.columns),
+        columns: t.columns,
         schemaName: s.name,
-      }))
-    );
+      }));
+    });
 
-    const rels = detectRelationships(allTables, allDdl);
+    // Build relationships from LLM-detected data stored in each table
+    const allRelationships: ERDRelationship[] = schemas.flatMap((s) => {
+      const parsed = normalizeTables(s.tables);
+      return parsed.flatMap((t) =>
+        (t.relationships || []).map((r) => ({
+          from: t.name,
+          fromCol: r.fromCol,
+          to: r.toTable,
+          toCol: r.toCol,
+        }))
+      );
+    });
 
-    return { tables: allTables, relationships: rels, ddl: allDdl };
+    return { tables: allTables, relationships: allRelationships, ddl: allDdl };
   }, [schemas]);
 
   const copyToClipboard = (text: string, field: string) => {
@@ -613,7 +517,6 @@ export function SchemaERD() {
               <div className="divide-y divide-border/50">
                 {table.columns.map((col, ci) => {
                   const isFK = outgoing.some((r) => r.fromCol.toLowerCase() === col.name.toLowerCase());
-                  const isReferenced = incoming.some((r) => r.toCol.toLowerCase() === col.name.toLowerCase());
 
                   return (
                     <div
@@ -681,7 +584,7 @@ export function SchemaERD() {
         {debugOpen && schemas && (
           <div className="border-t border-border divide-y divide-border/50">
             {schemas.map((schema) => {
-              const schemaTables = (schema.tables as Array<{ name: string; columns: string[] }>) || [];
+              const schemaTables = normalizeTables(schema.tables);
               const tablesJson = JSON.stringify(schemaTables, null, 2);
               const rawDdl = schema.parsedDdl || "(no DDL generated)";
 
@@ -703,14 +606,13 @@ export function SchemaERD() {
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
                         {schemaTables.map((t, ti) => {
-                          const parsed = parseColumnsFromDdl(schema.parsedDdl || "", t.name, t.columns);
-                          const pkCount = parsed.filter((c) => c.isPrimaryKey).length;
-                          const hasTypes = parsed.some((c) => c.type !== "");
+                          const pkCount = t.columns.filter((c) => c.isPrimaryKey).length;
+                          const hasTypes = t.columns.some((c) => c.type !== "");
                           return (
                             <Badge key={ti} variant="secondary" className="text-[9px] h-5 font-mono gap-1">
                               {t.name}
                               <span className="text-muted-foreground">
-                                {parsed.length}col{parsed.length !== 1 ? "s" : ""}
+                                {t.columns.length}col{t.columns.length !== 1 ? "s" : ""}
                                 {pkCount > 0 && ` · ${pkCount}pk`}
                                 {!hasTypes && " · no types"}
                               </span>

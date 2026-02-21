@@ -5,7 +5,7 @@ import { SqlEditor } from "@/components/SqlEditor";
 import { FeedbackPanel } from "@/components/FeedbackPanel";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { AskModule } from "@/components/AskModule";
-import { SchemaModule, SchemaTreePanel } from "@/components/SchemaModule";
+import { SchemaModule, SchemaTreePanel, normalizeTables } from "@/components/SchemaModule";
 import { VisualExplorer } from "@/components/VisualExplorer";
 import {
   ResizableHandle,
@@ -181,12 +181,15 @@ export default function Editor() {
     return feedbackHighlightedLines;
   }, [feedbackHighlightedLines]);
 
-  // Prepare schema data for VisualExplorer
+  // Prepare schema data for VisualExplorer (needs column names as strings)
   const schemaData = useMemo(() => {
     if (!schemas) return undefined;
     return schemas.map(s => ({
       name: s.name,
-      tables: (s.tables as Array<{ name: string; columns: string[] }>) || [],
+      tables: normalizeTables(s.tables).map(t => ({
+        name: t.name,
+        columns: t.columns.map(c => c.name),
+      })),
     }));
   }, [schemas]);
 

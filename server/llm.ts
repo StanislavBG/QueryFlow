@@ -108,8 +108,10 @@ ${sql}
 
 /**
  * Unified query analysis via a single LLM call.
- * Uses one context window with the query, schema, dialect, documents,
- * and previously accepted feedback to produce all recommendation categories.
+ *
+ * One structured call that analyzes the query across all enabled categories
+ * AND self-validates every suggestion for semantic/logical/performance safety.
+ * The LLM acts as both analyst and QA reviewer in a single context window.
  */
 export async function llmAnalyzeQuery(
   sql: string,
@@ -172,23 +174,30 @@ export async function llmAnalyzeQuery(
     messages: [
       {
         role: "user",
-        content: `You are a constructive SQL advisor. Analyze this SQL query and provide actionable feedback. Be non-judgmental and helpful — this is a tool for analysts to improve their work.
+        content: `You are an expert SQL analyst AND rigorous QA reviewer in one. Analyze this SQL query, provide actionable feedback, and self-validate every suggestion before including it.
 
 ${contextParts.join("\n")}
 
 Analyze across these enabled categories:
 ${categoryDescriptions}
 
+For each feedback item you consider, apply these QA validation checks BEFORE including it:
+1. **Semantic safety**: If your suggestion changes the query, would it preserve the result set? (row count, column values, NULL handling, DISTINCT behavior, aggregate results)
+2. **Logical safety**: Would it preserve filtering, join conditions, grouping, and ordering?
+3. **Performance safety**: Could it degrade performance? (removing index hints, adding unnecessary subqueries, changing join order)
+
+ONLY include a suggestion if it passes all three checks. If a suggestion would change query semantics because it fixes a genuine bug, include it but set severity to "error" and note the behavioral change in the message.
+
 Return a JSON array of feedback items. Each item must have:
 - "agentType": one of ${JSON.stringify(categories)}
 - "severity": "error" | "warning" | "info" | "success"
-  - Use "error" only for actual bugs or likely runtime failures
+  - Use "error" only for actual bugs, likely runtime failures, or suggestions that intentionally change behavior to fix a bug
   - Use "warning" for things that are probably wrong or will cause problems
   - Use "info" for suggestions and observations
   - Use "success" to acknowledge good practices you notice
 - "title": short title (under 60 chars)
-- "message": detailed explanation
-- "suggestion": actionable suggestion or null
+- "message": detailed explanation (include QA note if the suggestion changes behavior)
+- "suggestion": actionable suggestion that passes QA validation, or null
 - "lineNumber": relevant line number (1-indexed) or null
 
 Guidelines:
@@ -197,6 +206,7 @@ Guidelines:
 - Do not repeat suggestions the user has already accepted
 - If schemas are provided, validate column references, table names, and types
 - If documents are provided, check for consistency with documented conventions
+- NEVER include a suggestion that would silently change query results — either omit it or flag it as a bug fix with severity "error"
 
 SQL:
 \`\`\`sql
@@ -217,137 +227,6 @@ ${sql}
     }
   }
   return [];
-}
-
-/**
- * QA validation step: evaluates each recommendation's before/after SQL pair.
- * Removes recommendations that would cause:
- *  - Semantic differences (different result sets, row counts, NULL handling)
- *  - Logical differences (different filtering, join behavior, ordering)
- *  - Performance degradation (less efficient execution plans)
- *
- * Recommendations that identify genuine bugs are kept but flagged with
- * severity "error" so the user can decide.
- */
-export async function llmValidateRecommendations(
-  originalSql: string,
-  recommendations: Array<{
-    agentType: string;
-    severity: string;
-    title: string;
-    message: string;
-    suggestion: string | null;
-    lineNumber: number | null;
-  }>,
-  dialect: string = "Standard SQL"
-): Promise<Array<{
-  agentType: string;
-  severity: string;
-  title: string;
-  message: string;
-  suggestion: string | null;
-  lineNumber: number | null;
-}>> {
-  // Only validate recommendations that have concrete SQL suggestions
-  const withSuggestions = recommendations.filter((r) => r.suggestion && r.suggestion.trim().length > 0);
-  const withoutSuggestions = recommendations.filter((r) => !r.suggestion || r.suggestion.trim().length === 0);
-
-  if (withSuggestions.length === 0) {
-    return recommendations;
-  }
-
-  const openai = getClient();
-
-  // Build the evaluation prompt with all before/after pairs
-  const pairs = withSuggestions.map((r, i) => (
-    `### Recommendation ${i + 1}: "${r.title}" [${r.agentType}/${r.severity}]
-Message: ${r.message}
-Suggestion: ${r.suggestion}`
-  )).join("\n\n");
-
-  const response = await openai.chat.completions.create({
-    model: MODEL,
-    max_tokens: 4096,
-    messages: [
-      {
-        role: "user",
-        content: `You are a rigorous SQL QA reviewer. Your job is to protect the user from recommendations that would silently change query behavior.
-
-Given the original SQL and a set of recommendations with suggestions, evaluate EACH recommendation for:
-
-1. **Semantic equivalence**: Would applying the suggestion change the result set? (row count, column values, NULL handling, DISTINCT behavior, aggregate results)
-2. **Logical equivalence**: Would it change the filtering, join conditions, grouping, or ordering?
-3. **Performance safety**: Could it cause performance degradation? (removing indexes hints, adding unnecessary subqueries, changing join order in problematic ways)
-
-Dialect: ${dialect}
-
-Original SQL:
-\`\`\`sql
-${originalSql}
-\`\`\`
-
-${pairs}
-
-For EACH recommendation (by number), return a JSON array of verdict objects:
-- "index": the recommendation number (1-indexed)
-- "verdict": "safe" | "bug_fix" | "reject"
-  - "safe": The suggestion preserves semantics, logic, and performance. Keep it.
-  - "bug_fix": The suggestion intentionally changes semantics/logic because it fixes a genuine bug. Keep it but it should be flagged for user review.
-  - "reject": The suggestion would silently change semantics, logic, or degrade performance without fixing a bug. Remove it.
-- "reason": brief explanation of why (1-2 sentences)
-
-Return ONLY the JSON array.`,
-      },
-    ],
-  });
-
-  const text = extractText(response);
-
-  let verdicts: Array<{ index: number; verdict: string; reason: string }> = [];
-  const jsonMatch = text.match(/\[[\s\S]*\]/);
-  if (jsonMatch) {
-    try {
-      verdicts = JSON.parse(jsonMatch[0]);
-    } catch {
-      // If parsing fails, keep all recommendations (fail open)
-      return recommendations;
-    }
-  }
-
-  if (verdicts.length === 0) {
-    return recommendations;
-  }
-
-  // Build a map of verdicts by index
-  const verdictMap = new Map<number, { verdict: string; reason: string }>();
-  for (const v of verdicts) {
-    verdictMap.set(v.index, v);
-  }
-
-  // Filter and transform recommendations
-  const validated: typeof recommendations = [];
-
-  for (let i = 0; i < withSuggestions.length; i++) {
-    const rec = withSuggestions[i];
-    const v = verdictMap.get(i + 1);
-
-    if (!v || v.verdict === "safe") {
-      // Keep as-is
-      validated.push(rec);
-    } else if (v.verdict === "bug_fix") {
-      // Keep but mark as a suspected bug for user review
-      validated.push({
-        ...rec,
-        severity: "error",
-        title: `[Bug?] ${rec.title}`,
-        message: `${rec.message}\n\n⚠️ QA Review: This suggestion intentionally changes query behavior because a potential bug was identified. ${v.reason}`,
-      });
-    }
-    // verdict === "reject" → omitted from results
-  }
-
-  // Combine: validated suggestions + items without suggestions (info/success items)
-  return [...validated, ...withoutSuggestions];
 }
 
 /**
@@ -389,49 +268,47 @@ export async function llmAskQuestion(
 }
 
 /**
- * Extract a JSON array from LLM text output.
+ * Extract a JSON object from LLM text output.
  *
  * LLMs often wrap JSON in markdown fences or prepend reasoning text.
- * This helper tries progressively looser strategies to find the array.
+ * This helper tries progressively looser strategies to find the object.
  */
-function extractJsonArray(text: string): unknown[] | null {
+function extractJsonObject(text: string): Record<string, unknown> | null {
   // Strip markdown code fences
   const stripped = text.replace(/```(?:json)?\s*/g, "").replace(/```/g, "");
 
-  // Strategy 1: find the substring starting at the first `[{` and ending at the last `}]`
-  const start = stripped.indexOf("[");
-  const end = stripped.lastIndexOf("]");
+  // Strategy 1: find outermost { ... } containing "tables"
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
   if (start !== -1 && end > start) {
     try {
       const parsed = JSON.parse(stripped.slice(start, end + 1));
-      if (Array.isArray(parsed)) return parsed;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
     } catch { /* try next strategy */ }
   }
 
   // Strategy 2: try to parse the entire stripped text
   try {
     const parsed = JSON.parse(stripped);
-    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
   } catch { /* give up */ }
 
   return null;
 }
 
+import type { ParsedTable } from "@shared/schema";
+
 /**
  * Parse raw text content into structured schema definitions.
  *
- * Single LLM call to analyze the content and extract structured table/column
- * metadata. DDL is then built locally from the structured result — this is
- * deterministic and cannot fail.
- *
- * The prompt makes zero format assumptions. Users paste anything — MySQL
- * DESCRIBE output, raw DDL, CSV headers, JSON schemas, wiki pages, etc.
- * The LLM acts as a schema-extraction agent that figures it out.
+ * Single structured LLM call — the model returns the complete ERD-ready
+ * data structure (tables with typed columns, primary keys, relationships,
+ * and display DDL). No local parsing, regex, or DDL building.
  */
 export async function llmParseSchema(
   rawContent: string,
   fileName: string
-): Promise<{ parsed: string; tables: Array<{ name: string; columns: string[] }>; error?: string }> {
+): Promise<{ parsed: string; tables: ParsedTable[]; error?: string }> {
   const openai = getClient();
 
   console.log("[schema-parser] Starting parse for:", fileName, "content length:", rawContent.length);
@@ -442,19 +319,34 @@ export async function llmParseSchema(
     messages: [
       {
         role: "user",
-        content: `You are a schema-extraction agent. A user uploaded content from file "${fileName}". Your ONLY job: find every database table and column in this content and output structured JSON.
+        content: `You are a schema-extraction agent. A user uploaded content from file "${fileName}". Your ONLY job: find every database table and column in this content and return a single structured JSON object.
 
 The content can be in ANY format — database client output (e.g. MySQL DESCRIBE, \\d output), SQL DDL, spreadsheets, CSV, JSON, documentation, anything. Figure out what it is and extract the schema.
 
 RULES:
 - Strip schema/database prefixes from table names (e.g. "mydb.orders" → "orders", "gsm.temp_table" → "temp_table")
-- Preserve original data types exactly (e.g. varchar(15), decimal(10,2), int)
-- Identify primary keys and nullability where possible
+- Preserve original data types exactly as they appear (e.g. varchar(15), decimal(10,2), int, date)
+- Identify primary keys where possible (from PRI markers, PRIMARY KEY constraints, etc.)
+- Detect foreign key relationships between tables where possible (explicit FK constraints, naming conventions like *_id columns referencing other tables)
+- Generate clean CREATE TABLE DDL for display purposes
 - Ignore non-schema content (USE statements, SHOW commands, comments, etc.)
-- Output ONLY the JSON array below — no explanation, no markdown fences, no other text
+- Output ONLY the JSON object below — no explanation, no markdown fences, no other text
 
-OUTPUT FORMAT — a JSON array, one element per table:
-[{"table":"table_name","columns":[{"name":"col","type":"TYPE","nullable":false,"primaryKey":true}]}]
+OUTPUT FORMAT — a single JSON object:
+{
+  "tables": [
+    {
+      "name": "table_name",
+      "columns": [
+        {"name": "col_name", "type": "VARCHAR(255)", "isPrimaryKey": true}
+      ],
+      "relationships": [
+        {"fromCol": "user_id", "toTable": "users", "toCol": "id"}
+      ]
+    }
+  ],
+  "ddl": "CREATE TABLE table_name (\\n  col_name VARCHAR(255) PRIMARY KEY\\n);"
+}
 
 CONTENT:
 ${rawContent}`,
@@ -466,47 +358,42 @@ ${rawContent}`,
 
   console.log("[schema-parser] LLM response length:", text.length, "preview:", text.slice(0, 500));
 
-  const analysis = extractJsonArray(text) as Array<{
-    table: string;
-    columns: Array<{ name: string; type: string; nullable: boolean; primaryKey: boolean }>;
-  }> | null;
+  const result = extractJsonObject(text);
 
-  if (!analysis || analysis.length === 0) {
-    const error = `LLM returned no parseable table data. Response preview: ${text.slice(0, 300)}`;
+  if (!result || !Array.isArray(result.tables)) {
+    const error = `LLM returned no parseable schema data. Response preview: ${text.slice(0, 300)}`;
     console.error("[schema-parser]", error);
     return { parsed: rawContent, tables: [], error };
   }
 
-  // Validate structure — filter out malformed entries
-  const valid = analysis.filter(
-    (t) => typeof t.table === "string" && t.table.length > 0 && Array.isArray(t.columns)
-  );
+  // Validate and normalize each table entry
+  const tables: ParsedTable[] = (result.tables as Array<Record<string, unknown>>)
+    .filter((t) => typeof t.name === "string" && (t.name as string).length > 0 && Array.isArray(t.columns))
+    .map((t) => ({
+      name: t.name as string,
+      columns: (t.columns as Array<Record<string, unknown>>).map((c) => ({
+        name: String(c.name || ""),
+        type: String(c.type || ""),
+        isPrimaryKey: !!c.isPrimaryKey,
+      })),
+      relationships: Array.isArray(t.relationships)
+        ? (t.relationships as Array<Record<string, unknown>>).map((r) => ({
+            fromCol: String(r.fromCol || ""),
+            toTable: String(r.toTable || ""),
+            toCol: String(r.toCol || ""),
+          }))
+        : [],
+    }));
 
-  if (valid.length === 0) {
-    const error = `LLM returned data but no valid table entries. Parsed: ${JSON.stringify(analysis).slice(0, 300)}`;
+  if (tables.length === 0) {
+    const error = `LLM returned data but no valid table entries. Raw: ${JSON.stringify(result.tables).slice(0, 300)}`;
     console.error("[schema-parser]", error);
     return { parsed: rawContent, tables: [], error };
   }
 
-  // Build CREATE TABLE DDL deterministically from the structured analysis
-  const ddl = valid.map((t) => {
-    const pkCols = t.columns.filter((c) => c.primaryKey).map((c) => c.name);
-    const colLines = t.columns.map((c) => {
-      const parts = [c.name, c.type || "TEXT"];
-      if (!c.nullable) parts.push("NOT NULL");
-      if (c.primaryKey && pkCols.length === 1) parts.push("PRIMARY KEY");
-      return `  ${parts.join(" ")}`;
-    });
-    if (pkCols.length > 1) {
-      colLines.push(`  PRIMARY KEY (${pkCols.join(", ")})`);
-    }
-    return `CREATE TABLE ${t.table} (\n${colLines.join(",\n")}\n);`;
-  }).join("\n\n");
+  const ddl = typeof result.ddl === "string" ? result.ddl : rawContent;
 
-  const tables = valid.map((t) => ({
-    name: t.table,
-    columns: t.columns.map((c) => c.name),
-  }));
+  console.log("[schema-parser] Parsed", tables.length, "tables:", tables.map((t) => `${t.name}(${t.columns.length}cols)`).join(", "));
 
   return { parsed: ddl, tables };
 }
