@@ -5,7 +5,9 @@ import { SqlEditor } from "@/components/SqlEditor";
 import { FeedbackPanel } from "@/components/FeedbackPanel";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { AskModule } from "@/components/AskModule";
-import { SchemaModule, SchemaTreePanel, normalizeTables } from "@/components/SchemaModule";
+import { SchemaTreePanel, normalizeTables } from "@/components/SchemaModule";
+import type { SchemaSelection } from "@/components/SchemaModule";
+import { SchemaDetailView } from "@/components/SchemaDetailView";
 import { VisualExplorer } from "@/components/VisualExplorer";
 import {
   ResizableHandle,
@@ -107,6 +109,9 @@ export default function Editor() {
   const [, setLocation] = useLocation();
   const isAdmin = currentUser?.authenticated && currentUser?.role === "admin";
 
+  // Schema drill-down selection state (for schemas tab)
+  const [schemaSelection, setSchemaSelection] = useState<SchemaSelection | null>(null);
+
   // Hover/cursor linking state between editor and feedback panel
   const [hoveredEditorLine, setHoveredEditorLine] = useState<number | null>(null);
   const [cursorLine, setCursorLine] = useState<number | null>(null);
@@ -180,6 +185,11 @@ export default function Editor() {
   const editorHighlightedLines = useMemo(() => {
     return feedbackHighlightedLines;
   }, [feedbackHighlightedLines]);
+
+  // Resolve the best available query content – prefer the live editor text,
+  // but fall back to the persisted draft or saved content so the Visual tab
+  // (and other consumers) always have something even while a query is loading.
+  const resolvedQueryContent = currentContent || selectedQuery?.draftContent || selectedQuery?.content || "";
 
   // Prepare schema data for VisualExplorer (needs column names as strings)
   const schemaData = useMemo(() => {
@@ -357,16 +367,19 @@ export default function Editor() {
                 )}
                 {leftTab === "ask" && (
                   <AskModule
-                    queryContent={currentContent}
+                    queryContent={resolvedQueryContent}
                     dialect={detectedDialect}
                   />
                 )}
                 {leftTab === "schemas" && (
-                  <SchemaTreePanel />
+                  <SchemaTreePanel
+                    selection={schemaSelection}
+                    onSelect={setSchemaSelection}
+                  />
                 )}
                 {leftTab === "visual" && (
                   <VisualExplorer
-                    queryContent={currentContent}
+                    queryContent={resolvedQueryContent}
                     schemas={schemaData}
                   />
                 )}
@@ -504,14 +517,17 @@ export default function Editor() {
 
                 {activeTab.type === "schemas" && (
                   <div className="h-full overflow-auto">
-                    <SchemaModule />
+                    <SchemaDetailView
+                      selection={schemaSelection}
+                      onNavigate={setSchemaSelection}
+                    />
                   </div>
                 )}
 
                 {activeTab.type === "visual" && (
                   <div className="h-full overflow-auto">
                     <VisualExplorer
-                      queryContent={currentContent}
+                      queryContent={resolvedQueryContent}
                       schemas={schemaData}
                     />
                   </div>
@@ -529,6 +545,7 @@ export default function Editor() {
                 <FeedbackPanel
                   queryId={selectedQueryId}
                   dialect={detectedDialect}
+                  queryContent={resolvedQueryContent}
                   hoveredLine={hoveredEditorLine}
                   activeLine={cursorLine}
                   onFeedbackHover={handleFeedbackHover}
@@ -538,9 +555,15 @@ export default function Editor() {
               {activeTab.type === "schemas" && (
                 <div className="flex flex-col items-center justify-center h-full text-muted-foreground px-6 text-center">
                   <Table2 className="w-8 h-8 mb-3 opacity-40" />
-                  <p className="text-sm font-medium">Schema Details</p>
+                  <p className="text-sm font-medium">
+                    {schemaSelection?.columnName ? "Column Details" :
+                     schemaSelection?.tableName ? "Table Details" :
+                     schemaSelection?.schemaId ? "Schema Details" : "Schema Details"}
+                  </p>
                   <p className="text-xs mt-1 opacity-60">
-                    Select a schema in the left panel to view details, relationships, and ERD visualization.
+                    {schemaSelection?.schemaId
+                      ? "Use the mic icons to add voice or text context to schema items. This context feeds into query analysis."
+                      : "Select a schema in the left panel to view details, relationships, and ERD visualization."}
                   </p>
                 </div>
               )}

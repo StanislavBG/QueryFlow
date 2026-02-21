@@ -42,17 +42,37 @@ export const CATEGORY_DESCRIPTIONS: Record<AnalysisCategory, { name: string; des
 
 import type { UserSchema, ParsedTable, ParsedColumn, ParsedRelationship } from "@shared/schema";
 
-/** Build schema context string for LLM prompts, including descriptions as SQL comments. */
-function buildSchemaContext(schemas: UserSchema[]): string | undefined {
+/** Build schema context string for LLM prompts, including descriptions and voice annotations as SQL comments. */
+async function buildSchemaContext(schemas: UserSchema[]): Promise<string | undefined> {
   if (schemas.length === 0) return undefined;
-  const combined = schemas.map(s => {
-    const parts: string[] = [];
+  const parts: string[] = [];
+
+  for (const s of schemas) {
+    const schemaParts: string[] = [];
     if (s.description) {
-      parts.push(s.description.split('\n').map(l => `-- ${l}`).join('\n'));
+      schemaParts.push(s.description.split('\n').map(l => `-- ${l}`).join('\n'));
     }
-    if (s.parsedDdl) parts.push(s.parsedDdl);
-    return parts.join('\n');
-  }).filter(s => s.length > 0).join('\n\n');
+    if (s.parsedDdl) schemaParts.push(s.parsedDdl);
+
+    // Append voice context annotations for this schema
+    const voiceContexts = await storage.getSchemaVoiceContexts(s.id);
+    for (const vc of voiceContexts) {
+      if (!vc.transcript) continue;
+      let label = "";
+      if (vc.targetType === "schema") {
+        label = `schema "${s.name}"`;
+      } else if (vc.targetType === "table") {
+        label = `table "${vc.targetTable}"`;
+      } else if (vc.targetType === "column") {
+        label = `column "${vc.targetTable}.${vc.targetColumn}"`;
+      }
+      schemaParts.push(`-- User context for ${label}: ${vc.transcript}`);
+    }
+
+    if (schemaParts.length > 0) parts.push(schemaParts.join('\n'));
+  }
+
+  const combined = parts.join('\n\n');
   return combined || undefined;
 }
 
@@ -190,7 +210,10 @@ export async function registerRoutes(
       return res.status(404).json({ message: "Query not found" });
     }
 
-    if (!query.content.trim()) {
+    // Prefer the live editor content sent from the client; fall back to stored content
+    const sqlContent = (req.body.content || query.draftContent || query.content || "").toString();
+
+    if (!sqlContent.trim()) {
       return res.json([]);
     }
 
@@ -211,9 +234,9 @@ export async function registerRoutes(
       ? allSettings.filter(s => s.enabled).map(s => s.agentType)
       : [...ALL_CATEGORIES];
 
-    // Gather schema context
+    // Gather schema context (includes voice annotations)
     const schemas = await storage.getUserSchemas();
-    const schemaContext = buildSchemaContext(schemas);
+    const schemaContext = await buildSchemaContext(schemas);
 
     // Gather document context
     const docs = await storage.getDocuments();
@@ -238,7 +261,7 @@ export async function registerRoutes(
 
     try {
       // Call 1: Generate recommendations
-      const llmResults = await llmAnalyzeQuery(query.content, {
+      const llmResults = await llmAnalyzeQuery(sqlContent, {
         dialect,
         schemas: schemaContext,
         documents: docContext,
@@ -249,7 +272,7 @@ export async function registerRoutes(
       // Call 2: Independent QA validation — separate call reviews each
       // suggestion for semantic/logical/performance safety
       const validated = await llmValidateRecommendations(
-        query.content,
+        sqlContent,
         llmResults,
         dialect
       );
@@ -296,11 +319,9 @@ export async function registerRoutes(
       logActivity(fmtUserId, "format.run", "format");
 
       if (isLLMConfigured()) {
-        // Gather schemas for context
+        // Gather schemas for context (includes voice annotations)
         const schemas = await storage.getUserSchemas();
-        const schemaContext = schemas.length > 0
-          ? schemas.map(s => s.parsedDdl).filter(Boolean).join("\n\n")
-          : undefined;
+        const schemaContext = await buildSchemaContext(schemas);
 
         const result = await llmFormatQuery(input.sql, dialect, schemaContext);
         res.json({ formatted: result.formatted, notes: result.notes, llm: true });
@@ -373,11 +394,9 @@ export async function registerRoutes(
       const { userId: askUserId } = getAuth(req);
       logActivity(askUserId, "chat.ask", "chat");
 
-      // Gather schema context
+      // Gather schema context (includes voice annotations)
       const schemas = await storage.getUserSchemas();
-      const schemaContext = schemas.length > 0
-        ? schemas.map(s => s.parsedDdl).filter(Boolean).join("\n\n")
-        : undefined;
+      const schemaContext = await buildSchemaContext(schemas);
 
       const answer = await llmAskQuestion(
         input.question,
@@ -741,6 +760,78 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
     const deleted = await storage.deleteUserSchema(id);
     if (!deleted) return res.status(404).json({ message: "Schema not found" });
     res.json({ message: "Schema deleted" });
+  });
+
+  // ─── Schema Voice Context Routes ──────────────────────────────────
+
+  app.get("/api/schemas/:schemaId/voice-context", async (req, res) => {
+    const schemaId = parseInt(req.params.schemaId, 10);
+    if (isNaN(schemaId)) return res.status(400).json({ message: "Invalid schema ID" });
+    const contexts = await storage.getSchemaVoiceContexts(schemaId);
+    res.json(contexts);
+  });
+
+  app.post("/api/schemas/:schemaId/voice-context", async (req, res) => {
+    const schemaId = parseInt(req.params.schemaId, 10);
+    if (isNaN(schemaId)) return res.status(400).json({ message: "Invalid schema ID" });
+
+    try {
+      const input = z.object({
+        targetType: z.enum(["schema", "table", "column"]),
+        targetTable: z.string().nullable().optional(),
+        targetColumn: z.string().nullable().optional(),
+        transcript: z.string(),
+      }).parse(req.body);
+
+      const { userId } = getAuth(req);
+
+      const result = await storage.upsertSchemaVoiceContext({
+        schemaId,
+        userId: userId || null,
+        targetType: input.targetType,
+        targetTable: input.targetTable ?? null,
+        targetColumn: input.targetColumn ?? null,
+        transcript: input.transcript,
+      });
+
+      logActivity(userId, "voice_context.upsert", "schema", schemaId);
+      res.json(result);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      throw err;
+    }
+  });
+
+  app.delete("/api/schemas/:schemaId/voice-context/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+    const deleted = await storage.deleteSchemaVoiceContext(id);
+    if (!deleted) return res.status(404).json({ message: "Voice context not found" });
+    res.json({ message: "Voice context deleted" });
+  });
+
+  app.post("/api/schemas/:schemaId/voice-context/transcribe", async (req, res) => {
+    const schemaId = parseInt(req.params.schemaId, 10);
+    if (isNaN(schemaId)) return res.status(400).json({ message: "Invalid schema ID" });
+
+    try {
+      const input = z.object({ audio: z.string().min(1) }).parse(req.body);
+      const audioBuffer = Buffer.from(input.audio, "base64");
+
+      // Use the existing speechToText function from the audio integration
+      const { speechToText } = await import("./replit_integrations/audio/client");
+      const transcript = await speechToText(audioBuffer, "webm");
+
+      res.json({ transcript });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error("Transcription failed:", err);
+      res.status(500).json({ message: "Transcription failed" });
+    }
   });
 
   // ─── Chat Message Routes ────────────────────────────────────────────

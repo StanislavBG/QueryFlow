@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo } from "react";
-import { useUserSchemas, useCreateUserSchema, useDeleteUserSchema, useUpdateUserSchema } from "@/hooks/use-sql-queries";
+import { useUserSchemas, useCreateUserSchema, useDeleteUserSchema, useUpdateUserSchema, useSchemaVoiceContexts } from "@/hooks/use-sql-queries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,7 +22,8 @@ import {
   Check,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import type { UserSchema, ParsedTable, ParsedColumn } from "@shared/schema";
+import { VoiceContextButton } from "@/components/VoiceContextButton";
+import type { UserSchema, ParsedTable, ParsedColumn, SchemaVoiceContext } from "@shared/schema";
 
 // ---------------------------------------------------------------------------
 // Backward-compatibility normalizer for stored tables data.
@@ -68,7 +69,192 @@ export function normalizeTables(tables: unknown): ParsedTable[] {
 // SchemaTreePanel — compact tree for the LEFT sidebar
 // ---------------------------------------------------------------------------
 
-export function SchemaTreePanel() {
+// ---------------------------------------------------------------------------
+// Helper: find voice context for a given target within a list
+// ---------------------------------------------------------------------------
+
+function findVoiceContext(
+  contexts: SchemaVoiceContext[] | undefined,
+  targetType: "schema" | "table" | "column",
+  targetTable?: string | null,
+  targetColumn?: string | null,
+): SchemaVoiceContext | undefined {
+  if (!contexts) return undefined;
+  return contexts.find(
+    (c) =>
+      c.targetType === targetType &&
+      (c.targetTable ?? null) === (targetTable ?? null) &&
+      (c.targetColumn ?? null) === (targetColumn ?? null),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SchemaTreeNode — single schema node that fetches its own voice contexts
+// ---------------------------------------------------------------------------
+
+function SchemaTreeNode({
+  schema,
+  expandedSchemas,
+  expandedTables,
+  selection,
+  onToggleSchema,
+  onToggleTable,
+  onDelete,
+  onSelect,
+}: {
+  schema: UserSchema;
+  expandedSchemas: Set<number>;
+  expandedTables: Set<string>;
+  selection?: SchemaSelection | null;
+  onToggleSchema: (id: number) => void;
+  onToggleTable: (key: string) => void;
+  onDelete: (id: number) => void;
+  onSelect?: (selection: SchemaSelection | null) => void;
+}) {
+  const tables = normalizeTables(schema.tables);
+  const isExpanded = expandedSchemas.has(schema.id);
+  const { data: voiceContexts } = useSchemaVoiceContexts(isExpanded ? schema.id : null);
+
+  const isSchemaSelected = selection?.schemaId === schema.id && !selection?.tableName;
+
+  const handleSchemaClick = () => {
+    onToggleSchema(schema.id);
+    onSelect?.({ schemaId: schema.id });
+  };
+
+  return (
+    <div className="mb-0.5">
+      {/* Schema node */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={handleSchemaClick}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSchemaClick(); }}
+        className={`w-full flex items-center gap-1.5 px-1.5 py-1 rounded text-left hover:bg-accent/50 group cursor-pointer ${
+          isSchemaSelected ? "bg-primary/10 ring-1 ring-primary/30" : ""
+        }`}
+      >
+        {isExpanded ? (
+          <ChevronDown className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+        ) : (
+          <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+        )}
+        <Database className="w-3 h-3 text-primary flex-shrink-0" />
+        <span className="text-[11px] font-medium truncate flex-1">{schema.name}</span>
+        <VoiceContextButton
+          schemaId={schema.id}
+          targetType="schema"
+          existingContext={findVoiceContext(voiceContexts, "schema")}
+          size="sm"
+        />
+        <span className="text-[9px] text-muted-foreground/50">{tables.length}</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(schema.id); }}
+          className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/20 transition-all"
+        >
+          <Trash2 className="w-2.5 h-2.5 text-destructive" />
+        </button>
+      </div>
+
+      {/* Tables under this schema */}
+      {isExpanded && tables.map((table, ti) => {
+        const tableKey = `${schema.id}-${ti}`;
+        const isTableExpanded = expandedTables.has(tableKey);
+        const isTableSelected = selection?.schemaId === schema.id && selection?.tableName === table.name && !selection?.columnName;
+
+        return (
+          <div key={ti} className="ml-3">
+            <button
+              onClick={() => {
+                onToggleTable(tableKey);
+                onSelect?.({ schemaId: schema.id, tableName: table.name });
+              }}
+              className={`w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-left hover:bg-accent/50 ${
+                isTableSelected ? "bg-primary/10 ring-1 ring-primary/30" : ""
+              }`}
+            >
+              {isTableExpanded ? (
+                <ChevronDown className="w-2.5 h-2.5 text-muted-foreground flex-shrink-0" />
+              ) : (
+                <ChevronRight className="w-2.5 h-2.5 text-muted-foreground flex-shrink-0" />
+              )}
+              <Table2 className="w-3 h-3 text-emerald-500 flex-shrink-0" />
+              <span className="text-[10px] font-medium truncate">{table.name}</span>
+              <VoiceContextButton
+                schemaId={schema.id}
+                targetType="table"
+                targetTable={table.name}
+                existingContext={findVoiceContext(voiceContexts, "table", table.name)}
+                size="sm"
+              />
+              <span className="text-[9px] text-muted-foreground/50 ml-auto">{table.columns.length}</span>
+            </button>
+
+            {/* Columns under this table */}
+            {isTableExpanded && (
+              <div className="ml-5 border-l border-border/50 pl-2 py-0.5">
+                {table.columns.map((col, ci) => {
+                  const isColSelected = selection?.schemaId === schema.id && selection?.tableName === table.name && selection?.columnName === col.name;
+                  return (
+                    <div
+                      key={ci}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onSelect?.({ schemaId: schema.id, tableName: table.name, columnName: col.name })}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect?.({ schemaId: schema.id, tableName: table.name, columnName: col.name }); }}
+                      className={`flex items-center gap-1.5 py-[1px] text-[10px] rounded cursor-pointer hover:bg-accent/30 ${
+                        isColSelected ? "bg-primary/10 ring-1 ring-primary/30" : ""
+                      }`}
+                    >
+                      {col.isPrimaryKey ? (
+                        <Key className="w-2.5 h-2.5 text-amber-500 flex-shrink-0" />
+                      ) : (
+                        <Columns3 className="w-2.5 h-2.5 text-muted-foreground/40 flex-shrink-0" />
+                      )}
+                      <span className={`font-mono truncate ${col.isPrimaryKey ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                        {col.name}
+                      </span>
+                      {col.type && (
+                        <span className="text-[9px] text-muted-foreground/50 ml-auto font-mono flex-shrink-0">
+                          {col.type}
+                        </span>
+                      )}
+                      <VoiceContextButton
+                        schemaId={schema.id}
+                        targetType="column"
+                        targetTable={table.name}
+                        targetColumn={col.name}
+                        existingContext={findVoiceContext(voiceContexts, "column", table.name, col.name)}
+                        size="sm"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SchemaTreePanel — compact tree for the LEFT sidebar
+// ---------------------------------------------------------------------------
+
+export interface SchemaSelection {
+  schemaId?: number;
+  tableName?: string;
+  columnName?: string;
+}
+
+interface SchemaTreePanelProps {
+  onSelect?: (selection: SchemaSelection | null) => void;
+  selection?: SchemaSelection | null;
+}
+
+export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
   const { data: schemas, isLoading } = useUserSchemas();
   const deleteMutation = useDeleteUserSchema();
   const createMutation = useCreateUserSchema();
@@ -166,88 +352,19 @@ export function SchemaTreePanel() {
               <p className="text-[10px] text-muted-foreground/50 mt-0.5">Upload a DDL file to start</p>
             </div>
           ) : (
-            schemas.map((schema) => {
-              const tables = normalizeTables(schema.tables);
-              const isExpanded = expandedSchemas.has(schema.id);
-
-              return (
-                <div key={schema.id} className="mb-0.5">
-                  {/* Schema node */}
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => toggleSchema(schema.id)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleSchema(schema.id); }}
-                    className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded text-left hover:bg-accent/50 group cursor-pointer"
-                  >
-                    {isExpanded ? (
-                      <ChevronDown className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-                    ) : (
-                      <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-                    )}
-                    <Database className="w-3 h-3 text-primary flex-shrink-0" />
-                    <span className="text-[11px] font-medium truncate flex-1">{schema.name}</span>
-                    <span className="text-[9px] text-muted-foreground/50">{tables.length}</span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleDelete(schema.id); }}
-                      className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/20 transition-all"
-                    >
-                      <Trash2 className="w-2.5 h-2.5 text-destructive" />
-                    </button>
-                  </div>
-
-                  {/* Tables under this schema */}
-                  {isExpanded && tables.map((table, ti) => {
-                    const tableKey = `${schema.id}-${ti}`;
-                    const isTableExpanded = expandedTables.has(tableKey);
-
-                    return (
-                      <div key={ti} className="ml-3">
-                        <button
-                          onClick={() => toggleTable(tableKey)}
-                          className="w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-left hover:bg-accent/50"
-                        >
-                          {isTableExpanded ? (
-                            <ChevronDown className="w-2.5 h-2.5 text-muted-foreground flex-shrink-0" />
-                          ) : (
-                            <ChevronRight className="w-2.5 h-2.5 text-muted-foreground flex-shrink-0" />
-                          )}
-                          <Table2 className="w-3 h-3 text-emerald-500 flex-shrink-0" />
-                          <span className="text-[10px] font-medium truncate">{table.name}</span>
-                          <span className="text-[9px] text-muted-foreground/50 ml-auto">{table.columns.length}</span>
-                        </button>
-
-                        {/* Columns under this table */}
-                        {isTableExpanded && (
-                          <div className="ml-5 border-l border-border/50 pl-2 py-0.5">
-                            {table.columns.map((col, ci) => (
-                              <div
-                                key={ci}
-                                className="flex items-center gap-1.5 py-[1px] text-[10px]"
-                              >
-                                {col.isPrimaryKey ? (
-                                  <Key className="w-2.5 h-2.5 text-amber-500 flex-shrink-0" />
-                                ) : (
-                                  <Columns3 className="w-2.5 h-2.5 text-muted-foreground/40 flex-shrink-0" />
-                                )}
-                                <span className={`font-mono truncate ${col.isPrimaryKey ? "text-foreground font-medium" : "text-muted-foreground"}`}>
-                                  {col.name}
-                                </span>
-                                {col.type && (
-                                  <span className="text-[9px] text-muted-foreground/50 ml-auto font-mono flex-shrink-0">
-                                    {col.type}
-                                  </span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })
+            schemas.map((schema) => (
+              <SchemaTreeNode
+                key={schema.id}
+                schema={schema}
+                expandedSchemas={expandedSchemas}
+                expandedTables={expandedTables}
+                selection={selection}
+                onToggleSchema={toggleSchema}
+                onToggleTable={toggleTable}
+                onDelete={handleDelete}
+                onSelect={onSelect}
+              />
+            ))
           )}
         </div>
       </ScrollArea>
