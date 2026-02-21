@@ -398,9 +398,226 @@ export async function registerRoutes(
 
   // ─── User Schema Routes ─────────────────────────────────────────────
 
+  // ─── Schema Parse Test Endpoint ──────────────────────────────────────
+  // Exercises the full LLM schema-parsing pipeline with the mandatory
+  // 4-table GSM DESCRIBE fixture and returns a detailed diagnostic report.
+  // Usage: GET /api/schemas/test-parse
+  app.get("/api/schemas/test-parse", async (_req, res) => {
+    const FIXTURE = `USE gsm;
+SHOW TABLES;
+DESCRIBE gsm.temp_lan_wlan_cbom;
+TYPE\tvarchar(4)\tYES\tMUL\t\t
+Date_Uploaded\tdate\tNO\t\t\t
+ITEM_IN_BOM\tvarchar(10)\tNO\tPRI\t\t
+FYFQ\tvarchar(6)\tNO\tPRI\t\t
+Partner\tvarchar(15)\tNO\tPRI\t\t
+Product_SKU\tvarchar(20)\tNO\tPRI\t\t
+FY\tint\tNO\t\t\t
+FQ\tvarchar(3)\tNO\t\t\t
+Product_Used_In\tvarchar(25)\tNO\t\t\t
+Customer_Part_Number\tvarchar(42)\tYES\t\t\t
+CM_ODM_Part_Number\tvarchar(26)\tYES\t\t\t
+Manufacturer_Part_Number_MPN\tvarchar(110)\tYES\t\t\t
+Manufacturer\tvarchar(100)\tYES\t\t\t
+MPN_Description\tvarchar(190)\tYES\t\t\t
+CM_ODM_Control_Y_N\tvarchar(10)\tYES\t\t\t
+Commodity\tvarchar(50)\tYES\tMUL\t\t
+Quantity_Used\tdecimal(12,7)\tYES\t\t\t
+Current_Quarter_MPN_Cost\tdecimal(15,7)\tYES\t\t\t
+Dual_Sourced_Y_N\tvarchar(2)\tYES\t\t\t
+Current_Quarter_MPN_Allocation\tdecimal(10,7)\tYES\t\t\t
+Lead_Time_wks\tdecimal(6,2)\tYES\t\t\t
+Supplier_Location\tvarchar(60)\tYES\t\t\t
+Commodity_gr\tvarchar(50)\tYES\t\t\t
+Current_Qtr_PCA_Allocation\tdecimal(15,7)\tYES\t\t\t
+DESCRIBE gsm.lan_wlan_actuals;
+Date_Uploaded\tdate\tYES\t\t\t
+TYPE\tvarchar(4)\tYES\tMUL\t\t
+Partner\tvarchar(15)\tNO\tPRI\t\t
+FYFQ\tvarchar(6)\tNO\tPRI\t\t
+FY\tint\tNO\t\t\t
+FQ\tvarchar(3)\tNO\t\t\t
+Product_SKU\tvarchar(20)\tNO\tPRI\t\t
+Product_Used_In\tvarchar(20)\tNO\tPRI\t\t
+Qty_Ship\tdecimal(10,2)\tYES\t\t\t
+DESCRIBE gsm.lan_wlan_build_plan_of_rec_qtr;
+TYPE\tvarchar(4)\tYES\t\t\t
+CAL_MO_UPDATE\tdate\tNO\tPRI\t\t
+FYFQ\tvarchar(6)\tNO\tPRI\t\t
+FY\tint\tNO\t\t\t
+FQ\tvarchar(3)\tNO\t\t\t
+Partner\tvarchar(15)\tNO\tPRI\t\t
+Product_SKU\tvarchar(20)\tNO\tPRI\t\t
+Product_Used_In\tvarchar(25)\tNO\tPRI\t\t
+Frcs_Build_Qty\tdecimal(15,8)\tYES\t\t0.00000000\t
+Product_Used_In_upd\tvarchar(25)\tNO\t\t\t
+Current_location\tvarchar(45)\tYES\t\t\t
+New_location\tvarchar(45)\tYES\t\t\t
+Alloc_per_new_loc\tdecimal(10,7)\tYES\t\t\t
+Open_PO_Qty\tdecimal(15,8)\tYES\t\t0.00000000\t
+Only_BP_qty\tdecimal(15,8)\tYES\t\t\t
+DESCRIBE gsm.lan_wlan_tc;
+TYPE\tvarchar(4)\tNO\tPRI\tWLAN\t
+Date_Uploaded\tdate\tNO\t\t\t
+ITEM_IN_BOM\tvarchar(10)\tNO\tPRI\t\t
+FYFQ\tvarchar(6)\tNO\tPRI\t\t
+FY\tint\tNO\t\t\t
+FQ\tvarchar(3)\tNO\t\t\t
+Partner\tvarchar(15)\tNO\tPRI\t\t
+Product_SKU\tvarchar(20)\tNO\tPRI\t\t
+Product_Used_In\tvarchar(25)\tYES\t\t\t
+Product_Description\tvarchar(60)\tYES\t\t\t
+CM_ODM_Location\tchar(20)\tYES\t\t\t
+Total_BOM_Cost\tdecimal(15,7)\tYES\t\t\t
+Total_CM_ODM_Product_Cost\tdecimal(15,7)\tYES\t\t\t
+Total_MVA_Cost\tdecimal(15,7)\tYES\t\t\t
+ELF\tdecimal(15,7)\tYES\t\t\t
+FINAL_PRODUCT_COST\tdecimal(15,7)\tYES\t\t\t
+Product_Cycle\tvarchar(10)\tYES\t\t\t
+NPI_Product_Cost\tdecimal(15,7)\tYES\t\t\t
+NPI_BOM_Cost\tdecimal(15,7)\tYES\t\t\t
+NPI_Aruba_BOM_Cost\tdecimal(15,7)\tYES\t\t\t
+NPI_JDM_BOM_Cost\tdecimal(15,7)\tYES\t\t\t
+NPI_MVA\tdecimal(15,7)\tYES\t\t\t
+NPI_ELF\tdecimal(15,7)\tYES\t\t\t
+Aruba_BOM\tdecimal(15,7)\tYES\t\t\t
+JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
+
+    // ── Expected results ──
+    const EXPECTED_TABLES: Record<string, { minColumns: number; primaryKeys: string[] }> = {
+      temp_lan_wlan_cbom: {
+        minColumns: 23,
+        primaryKeys: ["ITEM_IN_BOM", "FYFQ", "Partner", "Product_SKU"],
+      },
+      lan_wlan_actuals: {
+        minColumns: 9,
+        primaryKeys: ["Partner", "FYFQ", "Product_SKU", "Product_Used_In"],
+      },
+      lan_wlan_build_plan_of_rec_qtr: {
+        minColumns: 15,
+        primaryKeys: ["CAL_MO_UPDATE", "FYFQ", "Partner", "Product_SKU", "Product_Used_In"],
+      },
+      lan_wlan_tc: {
+        minColumns: 24,
+        primaryKeys: ["TYPE", "ITEM_IN_BOM", "FYFQ", "Partner", "Product_SKU"],
+      },
+    };
+
+    const report: Record<string, unknown> = {
+      timestamp: new Date().toISOString(),
+      llmConfigured: isLLMConfigured(),
+      fixtureLength: FIXTURE.length,
+    };
+
+    if (!isLLMConfigured()) {
+      report.error = "LLM not configured — cannot run test";
+      return res.json(report);
+    }
+
+    try {
+      const startMs = Date.now();
+      const result = await llmParseSchema(FIXTURE, "gsm-describe-test.txt");
+      const elapsedMs = Date.now() - startMs;
+
+      report.elapsedMs = elapsedMs;
+      report.parseError = result.error || null;
+      report.tablesReturned = result.tables.length;
+      report.ddlLength = result.parsed.length;
+      report.ddlPreview = result.parsed.slice(0, 500);
+
+      // ── Validate each expected table ──
+      const tableValidation: Record<string, unknown> = {};
+
+      for (const [expectedName, expected] of Object.entries(EXPECTED_TABLES)) {
+        const found = result.tables.find(
+          (t) => t.name.toLowerCase() === expectedName.toLowerCase()
+        );
+
+        if (!found) {
+          tableValidation[expectedName] = {
+            status: "MISSING",
+            message: `Table "${expectedName}" not found in LLM output`,
+            availableTables: result.tables.map((t) => t.name),
+          };
+          continue;
+        }
+
+        const issues: string[] = [];
+
+        // Check column count
+        if (found.columns.length < expected.minColumns) {
+          issues.push(
+            `Expected >= ${expected.minColumns} columns, got ${found.columns.length}`
+          );
+        }
+
+        // Check primary keys
+        const actualPKs = found.columns
+          .filter((c) => c.isPrimaryKey)
+          .map((c) => c.name);
+
+        for (const pk of expected.primaryKeys) {
+          if (!actualPKs.some((a) => a.toLowerCase() === pk.toLowerCase())) {
+            issues.push(`Missing PK: "${pk}" (actual PKs: ${actualPKs.join(", ") || "(none)"})`);
+          }
+        }
+
+        // Check column types are not empty
+        const missingTypes = found.columns.filter((c) => !c.type || c.type.trim() === "");
+        if (missingTypes.length > 0) {
+          issues.push(
+            `${missingTypes.length} columns with empty type: ${missingTypes.map((c) => c.name).join(", ")}`
+          );
+        }
+
+        tableValidation[expectedName] = {
+          status: issues.length === 0 ? "PASS" : "FAIL",
+          columnCount: found.columns.length,
+          primaryKeys: actualPKs,
+          issues: issues.length > 0 ? issues : undefined,
+          columns: found.columns.map((c) => ({
+            name: c.name,
+            type: c.type,
+            isPrimaryKey: c.isPrimaryKey,
+          })),
+        };
+      }
+
+      // Check for unexpected extra tables
+      const expectedNames = new Set(Object.keys(EXPECTED_TABLES).map((n) => n.toLowerCase()));
+      const unexpected = result.tables.filter(
+        (t) => !expectedNames.has(t.name.toLowerCase())
+      );
+      if (unexpected.length > 0) {
+        report.unexpectedTables = unexpected.map((t) => t.name);
+      }
+
+      report.tableValidation = tableValidation;
+
+      // Overall verdict
+      const allStatuses = Object.values(tableValidation).map(
+        (v) => (v as Record<string, unknown>).status
+      );
+      report.verdict =
+        allStatuses.every((s) => s === "PASS") && unexpected.length === 0
+          ? "ALL PASS"
+          : "FAILURES DETECTED";
+
+      console.log("[schema-test] Test result:", report.verdict);
+    } catch (err) {
+      report.error = err instanceof Error ? err.message : String(err);
+      report.stack = err instanceof Error ? err.stack : undefined;
+    }
+
+    res.json(report);
+  });
+
   app.get("/api/schemas", async (req, res) => {
     const { userId } = getAuth(req);
     const schemas = await storage.getUserSchemas(userId || undefined);
+    console.log("[schema-route] GET /api/schemas — returning", schemas.length, "schemas:",
+      schemas.map(s => `id=${s.id} "${s.name}" tables=${Array.isArray(s.tables) ? s.tables.length : typeof s.tables}`).join(" | ")
+    );
     res.json(schemas);
   });
 
@@ -428,12 +645,14 @@ export async function registerRoutes(
       let parseError: string | undefined;
 
       // Always use LLM for schema parsing (per CLAUDE.md: all parsers must be LLM-based)
+      console.log("[schema-route] POST /api/schemas — name:", input.name, "| rawContent length:", input.rawContent.length, "| LLM configured:", isLLMConfigured());
       if (isLLMConfigured()) {
         try {
           const result = await llmParseSchema(input.rawContent, input.fileName || "schema.sql");
           parsedDdl = result.parsed;
           tables = result.tables;
           if (result.error) parseError = result.error;
+          console.log("[schema-route] llmParseSchema returned:", tables.length, "tables |", parsedDdl.length, "chars DDL | error:", result.error || "(none)");
         } catch (err) {
           parseError = `LLM schema parsing failed: ${err instanceof Error ? err.message : String(err)}`;
           console.error("[schema-route]", parseError, err);
@@ -441,6 +660,11 @@ export async function registerRoutes(
       } else {
         parseError = "LLM not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY to enable schema parsing.";
         console.warn("[schema-route]", parseError);
+      }
+
+      console.log("[schema-route] Storing schema — tables count:", tables.length, "| parsedDdl length:", parsedDdl.length);
+      if (tables.length > 0) {
+        console.log("[schema-route] Tables being stored:", tables.map(t => `${t.name}(${t.columns.length}cols)`).join(", "));
       }
 
       const schema = await storage.createUserSchema({
@@ -452,6 +676,8 @@ export async function registerRoutes(
         userId: userId || null,
         description: input.description ?? "",
       });
+
+      console.log("[schema-route] Schema saved — id:", schema.id, "| stored tables:", JSON.stringify(schema.tables).slice(0, 200));
 
       logActivity(userId, "schema.upload", "schema", schema.id);
       res.status(201).json({ ...schema, parseError });
