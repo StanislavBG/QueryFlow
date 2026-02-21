@@ -43,3 +43,6 @@ waitForPort = 5000
 
 [userenv.shared]
 VITE_CLERK_PUBLISHABLE_KEY = "pk_test_Y29oZXJlbnQtbWlubm93LTYuY2xlcmsuYWNjb3VudHMuZGV2JA"
+
+[agent]
+integrations = ["javascript_openai_ai_integrations:2.0.0"]
