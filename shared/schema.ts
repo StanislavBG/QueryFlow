@@ -145,6 +145,24 @@ export type UserSchema = typeof userSchemas.$inferSelect;
 export type InsertUserSchema = z.infer<typeof insertUserSchemaSchema>;
 export type UpdateUserSchema = z.infer<typeof updateUserSchemaSchema>;
 
+// Schema Voice Context table (voice/text annotations on schemas, tables, columns)
+export const schemaVoiceContext = pgTable("schema_voice_context", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id", { length: 255 }),
+  schemaId: integer("schema_id").notNull(),
+  targetType: varchar("target_type", { length: 20 }).notNull(), // 'schema' | 'table' | 'column'
+  targetTable: varchar("target_table", { length: 255 }),
+  targetColumn: varchar("target_column", { length: 255 }),
+  transcript: text("transcript").notNull().default(""),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertSchemaVoiceContextSchema = createInsertSchema(schemaVoiceContext).omit({ id: true, createdAt: true, updatedAt: true });
+
+export type SchemaVoiceContext = typeof schemaVoiceContext.$inferSelect;
+export type InsertSchemaVoiceContext = z.infer<typeof insertSchemaVoiceContextSchema>;
+
 // Chat Messages table (persistent conversations)
 export const chatMessages = pgTable("chat_messages", {
   id: serial("id").primaryKey(),
