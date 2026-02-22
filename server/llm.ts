@@ -196,9 +196,13 @@ export async function llmAnalyzeQuery(
     ? `\nThe user has prioritized the following analysis areas (emphasize these in your output, but still report critical findings in other areas):\n${enabledCategories.map(c => `- ${c}`).join("\n")}`
     : "";
 
+  // Scale max_tokens based on input size: short queries get 16k, large procedures/batches get 32k
+  const sqlLineCount = sql.split("\n").length;
+  const maxTokens = sqlLineCount >= 100 ? 32768 : 16384;
+
   const response = await openai.chat.completions.create({
     model: MODEL,
-    max_tokens: 8192,
+    max_tokens: maxTokens,
     messages: [
       {
         role: "user",
@@ -248,25 +252,31 @@ Return a JSON array of feedback items. Each item must have:
   - "info" — suggestions, observations, alternative approaches
   - "success" — acknowledgment of good practices
 - "title": string — short, specific title (under 60 chars)
-- "message": string — detailed explanation referencing exact tables, columns, clauses, and line numbers
-- "suggestion": string | null — actionable text explanation of the recommended change
-- "beforeSql": string | null — the relevant SQL snippet from the original query that would change (extract the minimal meaningful fragment)
-- "afterSql": string | null — the rewritten SQL snippet showing the recommended change
-- "lineNumber": number | null — 1-indexed line number in the original input
+- "message": string — **in-depth explanation** (minimum 4-6 sentences). This is the primary value the analyst reads. Explain:
+  (a) exactly what the problem or opportunity is, referencing specific table names, column names, clauses, and line numbers;
+  (b) WHY it matters — what is the concrete business/performance/correctness/security impact if left unchanged;
+  (c) the underlying principle (e.g., sargability, index usage, NULL propagation, set-based thinking, data integrity);
+  (d) any caveats, trade-offs, or edge cases the analyst should be aware of.
+  Write for a seasoned business analyst or DBA — be precise, cite specifics, avoid generic advice.
+- "suggestion": string | null — actionable text explanation of the recommended change (2-3 sentences minimum)
+- "beforeSql": string | null — the FULL relevant section/clause of the original query that this finding relates to (not just the single changed token — include enough surrounding SQL for the analyst to immediately recognize the code section in context: the full SELECT list, the full JOIN + ON clause, the full WHERE block, the full CTE, etc.)
+- "afterSql": string | null — the rewritten version of the SAME full section showing the recommended change in context
+- "lineNumber": number | null — 1-indexed line number in the original input where this section begins
 
 ## Guidelines
 - **Be thorough**: There is no hard cap on findings. Report every significant issue. For a simple query, 3-8 items is typical. For complex stored procedures or multi-statement batches, produce as many findings as warranted — 15, 20, or more if the input justifies it. Never pad with low-value observations; every item must be high-signal.
 - **Priority ordering**: Return items in descending order of importance. Errors and bugs first, then warnings, then informational items. Within the same severity, front-load the highest-impact findings.
-- **Before/after SQL**: For every suggestion that modifies SQL, include "beforeSql" (the original fragment) and "afterSql" (the improved fragment). Keep snippets minimal — only the relevant clause or statement, not the entire query. Set both to null for observations with no concrete SQL change.
+- **Before/after SQL — FULL CONTEXT**: For every suggestion that modifies SQL, include "beforeSql" and "afterSql". These MUST contain the full relevant clause or section, NOT just the single changed line. An analyst looking at the before/after side-by-side should be able to understand the change without needing to look at the original query. Include the full SELECT clause, the full JOIN block, the full WHERE predicate tree, or the full CTE — whatever logical unit contains the change. Set both to null only for observations with no concrete SQL change.
+- **Deep explanations**: The "message" field is the core analytical value. A one-sentence message is NEVER acceptable. Always explain the "why" — the performance characteristic, the data integrity risk, the execution plan implication, the standard being violated, or the business logic concern. Reference specific tables, columns, and line numbers. Cite the underlying SQL principle.
 - **Specificity**: Reference exact column names, table names, clauses, and line numbers. Never make generic statements like "consider optimizing this query."
-- **At least one success**: If the query has any good practices, acknowledge them.
+- **At least one success**: If the query has any good practices, acknowledge them with a substantive explanation of why that pattern is good.
 - **Do not repeat**: Skip suggestions the user has already accepted.
 - **Schema-aware analysis**:
   - If schemas are provided: validate column references, types, and joins against the schema. Suppress false positives — do not flag columns as ambiguous if the schema resolves them.
   - If schemas are NOT provided: flag genuinely ambiguous references as warnings. Recommend adding schema definitions for more precise analysis.
 - **Document-aware analysis**: If documents are provided, check for consistency with documented conventions.
 - **Semantic safety**: When generating afterSql, ensure it preserves the query's semantic intent. Do not suggest changes that alter the result set, NULL handling, or row count — the downstream QA validator will reject such changes.
-- **Alternative designs**: When you see an opportunity for a fundamentally better approach (not just a tweak), include it as an "alternative_design" item with full before/after SQL and explanation of trade-offs.
+- **Alternative designs**: When you see an opportunity for a fundamentally better approach (not just a tweak), include it as an "alternative_design" item with full before/after SQL and a thorough explanation of trade-offs (performance, readability, maintainability, compatibility).
 - **Security and compliance**: Actively look for SQL injection risks, excessive data exposure, missing access controls, PII handling, and audit gaps. Flag these even if not in the prioritized categories.
 
 SQL:
