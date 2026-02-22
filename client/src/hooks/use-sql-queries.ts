@@ -89,6 +89,7 @@ export interface ContextBlock {
   label: string;
   content: string;
   itemCount?: number;
+  charCount?: number;
 }
 
 export function useAnalysisContext() {

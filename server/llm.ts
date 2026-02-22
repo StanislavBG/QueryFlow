@@ -246,9 +246,8 @@ export async function llmAnalyzeQuery(
     ? `\nThe user has prioritized the following analysis areas (emphasize these in your output, but still report critical findings in other areas):\n${enabledCategories.map(c => `- ${c}`).join("\n")}`
     : "";
 
-  // Scale max_tokens based on input size: short queries get 32k, large procedures/batches get 64k
-  const sqlLineCount = sql.split("\n").length;
-  const maxTokens = sqlLineCount >= 100 ? 65536 : 32768;
+  // Cap max_tokens to model limit (16384 for completion tokens)
+  const maxTokens = 16384;
 
   const response = await openai.chat.completions.create({
     model: MODEL,
