@@ -312,264 +312,82 @@ function makeDemoQuery(result: DemoBootstrapResult): SqlQuery {
 }
 
 // ---------------------------------------------------------------------------
-// Terms of Service modal
+// Waterfall Detail Panel — right sidebar for visual tab
 // ---------------------------------------------------------------------------
 
-function TermsOfServiceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
+const EDGE_TYPE_LABELS: Record<string, { label: string; colorClass: string }> = {
+  join:           { label: "JOIN",            colorClass: "bg-blue-500/10 text-blue-500 border-blue-500/30" },
+  create_insert:  { label: "CREATE / INSERT", colorClass: "bg-emerald-500/10 text-emerald-500 border-emerald-500/30" },
+  cte_definition: { label: "CTE",            colorClass: "bg-purple-500/10 text-purple-500 border-purple-500/30" },
+  subquery_ref:   { label: "SUBQUERY",        colorClass: "bg-amber-500/10 text-amber-500 border-amber-500/30" },
+  select_from:    { label: "SELECT",          colorClass: "bg-muted text-muted-foreground" },
+};
 
-  useEffect(() => {
-    if (!open) return;
-    const el = dialogRef.current;
-    if (el) el.focus();
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { onClose(); return; }
-      if (e.key !== "Tab" || !el) return;
-      const focusable = el.querySelectorAll<HTMLElement>('button, a[href], [tabindex]:not([tabindex="-1"])');
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+function WaterfallDetailPanel({
+  selectedEdge,
+  analysis,
+}: {
+  selectedEdge: import("@shared/waterfall").WaterfallEdge | null;
+  analysis: import("@shared/waterfall").WaterfallAnalysis | null;
+}) {
+  if (!selectedEdge || !analysis) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground px-6 text-center">
+        <Boxes className="w-8 h-8 mb-3 opacity-40" />
+        <p className="text-sm font-medium">Flow Detail</p>
+        <p className="text-xs mt-1 opacity-60">
+          Hover or click a connector in the waterfall to see the SQL statement
+          that moves data between tables.
+        </p>
+      </div>
+    );
+  }
 
-  if (!open) return null;
+  const fromNode = analysis.nodes.find((n) => n.id === selectedEdge.fromNodeId);
+  const toNode = analysis.nodes.find((n) => n.id === selectedEdge.toNodeId);
+  const edgeMeta = EDGE_TYPE_LABELS[selectedEdge.edgeType] || EDGE_TYPE_LABELS.select_from;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tos-title"
-        tabIndex={-1}
-        className="bg-card border border-border rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[80vh] overflow-auto outline-none"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-6 space-y-4">
-          <div className="flex items-center gap-2">
-            <Scale className="w-5 h-5 text-primary" />
-            <h2 id="tos-title" className="text-lg font-bold">Terms of Service</h2>
-          </div>
-          <p className="text-xs text-muted-foreground">Last updated: February 2026</p>
-
-          <div className="space-y-3 text-sm text-muted-foreground leading-relaxed">
-            <div>
-              <h3 className="text-foreground font-semibold mb-1">1. Acceptance of Terms</h3>
-              <p>
-                By accessing or using QueryFlow, you agree to be bound by these Terms of Service. If you
-                do not agree, do not use the service. QueryFlow is an AI-powered SQL query analysis tool
-                that provides automated feedback on your SQL queries.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-foreground font-semibold mb-1">2. Service Description</h3>
-              <p>
-                QueryFlow provides SQL query analysis, formatting, voice-to-SQL generation, schema
-                management, and visual query exploration. All intelligent features are powered by
-                third-party AI services (OpenAI). Query content you submit is transmitted to OpenAI
-                for processing and analysis.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-foreground font-semibold mb-1">3. User Responsibilities</h3>
-              <p>
-                You are solely responsible for the SQL queries, schema definitions, and data you submit.
-                Do not submit queries containing production credentials, personally identifiable
-                information (PII), or data subject to regulatory restrictions (HIPAA, GDPR, PCI-DSS, etc.)
-                unless you have confirmed compliance with your organization's data policies. You must not
-                use QueryFlow to generate malicious SQL or for any unlawful purpose.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-foreground font-semibold mb-1 flex items-center gap-1.5">
-                <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
-                4. Third-Party AI Processing
-              </h3>
-              <p>
-                QueryFlow transmits your queries, schemas, and context to OpenAI's API. By using
-                QueryFlow, you acknowledge and consent to this data transmission. OpenAI's{" "}
-                <a href="https://openai.com/policies/api-data-usage-policies" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                  API data usage policies
-                </a>{" "}
-                govern how they handle data received via their API.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-foreground font-semibold mb-1 flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 text-emerald-500" />
-                5. Data Storage &amp; Security
-              </h3>
-              <p>
-                Data stored in QueryFlow is encrypted at rest using AES-256 encryption. You may delete
-                your queries, schemas, and context at any time — deletion is permanent and immediate from
-                our database. Data previously sent to OpenAI is subject to OpenAI's retention policies.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-foreground font-semibold mb-1">6. Intellectual Property</h3>
-              <p>
-                You retain all ownership rights to the SQL queries, schemas, and content you submit.
-                QueryFlow does not claim ownership of your content. AI-generated suggestions (formatting,
-                analysis feedback, voice-to-SQL output) are provided for your use without restriction.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-foreground font-semibold mb-1">7. Disclaimer of Warranties</h3>
-              <p>
-                QueryFlow is provided "as is" without warranties of any kind. AI-generated analysis and
-                suggestions may contain errors. You are responsible for reviewing and validating all
-                AI-generated output before using it in production systems. QueryFlow does not guarantee
-                the accuracy, completeness, or reliability of any analysis.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-foreground font-semibold mb-1">8. Limitation of Liability</h3>
-              <p>
-                QueryFlow and its operators shall not be liable for any indirect, incidental, or
-                consequential damages arising from your use of the service, including but not limited
-                to data loss, query errors, or downstream effects of applying AI-generated suggestions.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-foreground font-semibold mb-1">9. Modifications</h3>
-              <p>
-                We may update these Terms at any time. Continued use of QueryFlow after changes
-                constitutes acceptance of the revised Terms. Material changes will be indicated by
-                updating the "Last updated" date above.
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={onClose}
-            className="w-full mt-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-border bg-card">
+        <div className="flex items-center gap-2 mb-2">
+          <Badge
+            variant="outline"
+            className={`text-[10px] h-5 px-2 ${edgeMeta.colorClass}`}
           >
-            Close
-          </button>
+            {edgeMeta.label}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="font-mono font-semibold text-foreground">
+            {fromNode?.name || "?"}
+          </span>
+          <span className="text-muted-foreground">→</span>
+          <span className="font-mono font-semibold text-foreground">
+            {toNode?.name || "?"}
+          </span>
         </div>
       </div>
-    </div>
-  );
-}
 
-// ---------------------------------------------------------------------------
-// Data Handling & Privacy modal
-// ---------------------------------------------------------------------------
-
-function DataPolicyModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const el = dialogRef.current;
-    if (el) el.focus();
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { onClose(); return; }
-      if (e.key !== "Tab" || !el) return;
-      const focusable = el.querySelectorAll<HTMLElement>('button, a[href], [tabindex]:not([tabindex="-1"])');
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
-
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="data-policy-title"
-        tabIndex={-1}
-        className="bg-card border border-border rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[80vh] overflow-auto outline-none"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-6 space-y-4">
-          <div className="flex items-center gap-2">
-            <Shield className="w-5 h-5 text-primary" />
-            <h2 id="data-policy-title" className="text-lg font-bold">How We Handle Your Data</h2>
+      {/* SQL statement */}
+      <div className="flex-1 overflow-auto p-4">
+        {selectedEdge.joinDetails && (
+          <div className="mb-3">
+            <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+              Join Condition
+            </h4>
+            <p className="text-xs font-mono text-foreground bg-muted/50 rounded px-2 py-1">
+              {selectedEdge.joinDetails}
+            </p>
           </div>
-
-          <div className="space-y-3 text-sm text-muted-foreground leading-relaxed">
-            <div>
-              <h3 className="text-foreground font-semibold mb-1 flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 text-emerald-500" />
-                Encryption at Rest
-              </h3>
-              <p>
-                All data stored in QueryFlow — including your SQL queries, schemas, voice context, and
-                analysis feedback — is encrypted at rest using AES-256 encryption via the database
-                provider's built-in encryption layer. Backups are also encrypted. Your data is never
-                stored in plaintext on disk.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-foreground font-semibold mb-1 flex items-center gap-1.5">
-                <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
-                AI Processing via OpenAI
-              </h3>
-              <p>
-                QueryFlow sends your SQL queries, schema definitions, and associated context to
-                OpenAI's API for analysis, formatting, and query generation. This means your SQL
-                content is transmitted to and processed by OpenAI's servers. By using QueryFlow's
-                AI features, you acknowledge and consent to this data transmission.
-              </p>
-              <p className="mt-1.5">
-                OpenAI's data usage policy applies to content sent through their API. We recommend
-                reviewing{" "}
-                <a href="https://openai.com/policies/api-data-usage-policies" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                  OpenAI's API data usage policies
-                </a>{" "}
-                to understand how they handle data received via their API.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-foreground font-semibold mb-1">Your Responsibility</h3>
-              <p>
-                You are responsible for determining whether your SQL queries and schema data are
-                appropriate to process through third-party AI services. Do not submit queries
-                containing sensitive credentials, personally identifiable information (PII), or
-                data subject to regulatory restrictions (HIPAA, GDPR, etc.) unless you have
-                confirmed compliance with your organization's data policies.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-foreground font-semibold mb-1">Data Retention</h3>
-              <p>
-                Your queries and schemas are stored only in your QueryFlow account database.
-                You can delete any query, schema, or context at any time. Deletion is permanent
-                and immediate from our database. Data previously sent to OpenAI for processing
-                is subject to OpenAI's retention policies.
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={onClose}
-            className="w-full mt-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
-          >
-            I Understand
-          </button>
-        </div>
+        )}
+        <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+          SQL Statement
+        </h4>
+        <pre className="text-xs font-mono text-foreground bg-muted/50 rounded p-3 whitespace-pre-wrap break-words overflow-auto max-h-[60vh] border border-border">
+          {selectedEdge.sqlStatement || "No SQL captured for this connection."}
+        </pre>
       </div>
     </div>
   );
@@ -627,6 +445,10 @@ export default function Editor() {
 
   // Schema drill-down selection state (for schemas tab)
   const [schemaSelection, setSchemaSelection] = useState<SchemaSelection | null>(null);
+
+  // Waterfall flow state (for visual tab)
+  const [waterfallAnalysis, setWaterfallAnalysis] = useState<import("@shared/waterfall").WaterfallAnalysis | null>(null);
+  const [selectedWaterfallEdge, setSelectedWaterfallEdge] = useState<import("@shared/waterfall").WaterfallEdge | null>(null);
 
   // Hover/cursor linking state between editor and feedback panel
   const [hoveredEditorLine, setHoveredEditorLine] = useState<number | null>(null);
@@ -1094,6 +916,10 @@ GROUP BY 1 ORDER BY 1`}
                   <VisualExplorer
                     queryContent={resolvedQueryContent}
                     schemas={schemaData}
+                    dialect={detectedDialect}
+                    onEdgeSelect={setSelectedWaterfallEdge}
+                    selectedEdgeId={selectedWaterfallEdge?.id ?? null}
+                    onAnalysisComplete={setWaterfallAnalysis}
                   />
                 )}
               </div>
@@ -1242,6 +1068,10 @@ GROUP BY 1 ORDER BY 1`}
                     <VisualExplorer
                       queryContent={resolvedQueryContent}
                       schemas={schemaData}
+                      dialect={detectedDialect}
+                      onEdgeSelect={setSelectedWaterfallEdge}
+                      selectedEdgeId={selectedWaterfallEdge?.id ?? null}
+                      onAnalysisComplete={setWaterfallAnalysis}
                     />
                   </div>
                 )}
@@ -1279,13 +1109,10 @@ GROUP BY 1 ORDER BY 1`}
               )}
 
               {activeTab.type === "visual" && (
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground px-6 text-center">
-                  <Boxes className="w-8 h-8 mb-3 opacity-40" />
-                  <p className="text-sm font-medium">Visual Properties</p>
-                  <p className="text-xs mt-1 opacity-60">
-                    Select tables and transformations in the visual view to inspect and edit their properties.
-                  </p>
-                </div>
+                <WaterfallDetailPanel
+                  selectedEdge={selectedWaterfallEdge}
+                  analysis={waterfallAnalysis}
+                />
               )}
             </div>
           </ResizablePanel>

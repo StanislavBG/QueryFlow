@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import type { WaterfallAnalysis, WaterfallNode, WaterfallEdge } from "@shared/waterfall";
 
 let client: OpenAI | null = null;
 
@@ -847,5 +848,146 @@ Return ONLY a JSON object with this exact structure (no markdown fences, no expl
       title: (queryData.title as string) || "Monthly Revenue & Customer Analytics Dashboard",
       content: queryData.content as string,
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Waterfall Flow Analysis
+// ---------------------------------------------------------------------------
+
+/**
+ * Analyse a SQL query or stored procedure and decompose it into a directed
+ * acyclic graph (DAG) showing how data flows from source tables through
+ * intermediate transformations (CTEs, temp tables, subqueries) to the final
+ * output.  Returns a WaterfallAnalysis object.
+ */
+export async function llmAnalyzeWaterfall(
+  sql: string,
+  options: { dialect?: string; schemas?: string } = {}
+): Promise<WaterfallAnalysis> {
+  const ai = getClient();
+
+  const dialectHint = options.dialect
+    ? `The SQL dialect is ${options.dialect}.`
+    : "";
+  const schemaHint = options.schemas
+    ? `\n\nKnown database schema:\n${options.schemas}`
+    : "";
+
+  const response = await ai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 16384,
+    messages: [
+      {
+        role: "system",
+        content: `You are a SQL procedure analyzer. Given a SQL query or stored procedure, decompose it into a directed acyclic graph (DAG) showing how data flows from source tables through intermediate transformations to the final output.
+
+${dialectHint}${schemaHint}
+
+RULES:
+1. Identify every distinct data entity: base tables (in FROM/JOIN), CTEs (WITH clauses), temporary tables (#temp or CREATE TEMP TABLE), derived subqueries (aliased subselects in FROM), and the final output.
+2. Assign each entity a nodeType:
+   - "source_table": base/persistent tables referenced as data sources
+   - "cte": WITH ... AS (...) common table expressions
+   - "temp_table": CREATE TEMP TABLE, INSERT INTO #table, or session-scoped tables
+   - "derived_table": subquery aliased in FROM clause
+   - "final_output": the final SELECT result set, or the persistent table being written to at the end
+3. Order nodes by stepIndex (integer, 0 = topmost). Source tables with no dependencies are stepIndex 0. Each subsequent transformation gets a higher stepIndex. Multiple nodes can share the same stepIndex (they appear side-by-side in the same row).
+4. For each data-flow relationship, create an edge with:
+   - edgeType: one of "join", "create_insert", "cte_definition", "subquery_ref", "select_from"
+     - "join": SQL JOINs multiple tables together
+     - "create_insert": CREATE TABLE AS or INSERT INTO ... SELECT
+     - "cte_definition": defines a CTE from source tables
+     - "subquery_ref": references a derived subquery
+     - "select_from": simple SELECT FROM (final read)
+   - sqlStatement: the EXACT SQL text (verbatim from the input, preserving whitespace) that performs this data movement. For JOINs include the full SELECT...FROM...JOIN...ON block. For CREATE/INSERT include the full statement. For CTEs include the CTE definition body.
+   - joinDetails: for JOIN edges only, the specific join condition e.g. "LEFT JOIN orders ON c.id = o.customer_id"
+5. If multiple source tables are JOINed into one result, create one edge per source table all pointing to the same destination node. They may share the same sqlStatement.
+6. The final node should be the persistent table being written to (INSERT/CREATE) or the final SELECT output. Use nodeType "final_output".
+7. Every node must be connected by at least one edge (no orphans).
+8. Use unique string IDs: "node_0", "node_1", ... for nodes and "edge_0", "edge_1", ... for edges.
+
+Return ONLY a JSON object with this exact structure (no extra text, no markdown fences):
+{
+  "nodes": [
+    { "id": "node_0", "name": "table_name", "nodeType": "source_table", "columns": ["col1", "col2"], "stepIndex": 0 }
+  ],
+  "edges": [
+    { "id": "edge_0", "fromNodeId": "node_0", "toNodeId": "node_2", "edgeType": "join", "sqlStatement": "SELECT ... FROM ... JOIN ...", "joinDetails": "INNER JOIN ON ..." }
+  ],
+  "summary": "Brief description of the data flow"
+}`,
+      },
+      {
+        role: "user",
+        content: sql,
+      },
+    ],
+  });
+
+  const text = extractText(response);
+  const raw = extractJsonObject(text);
+
+  if (!raw || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) {
+    console.error("[waterfall] LLM returned invalid structure:", text.slice(0, 500));
+    throw new Error("Failed to parse waterfall analysis from LLM response");
+  }
+
+  // Validate & normalize nodes
+  const validNodeTypes = new Set([
+    "source_table", "cte", "temp_table", "derived_table", "final_output",
+  ]);
+  const nodes: WaterfallNode[] = (raw.nodes as Array<Record<string, unknown>>)
+    .filter(
+      (n) =>
+        typeof n.id === "string" &&
+        typeof n.name === "string" &&
+        typeof n.stepIndex === "number"
+    )
+    .map((n) => ({
+      id: String(n.id),
+      name: String(n.name),
+      nodeType: validNodeTypes.has(String(n.nodeType))
+        ? (String(n.nodeType) as WaterfallNode["nodeType"])
+        : "source_table",
+      columns: Array.isArray(n.columns)
+        ? (n.columns as unknown[]).map(String)
+        : undefined,
+      stepIndex: Number(n.stepIndex),
+    }));
+
+  // Validate & normalize edges
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const validEdgeTypes = new Set([
+    "join", "create_insert", "cte_definition", "subquery_ref", "select_from",
+  ]);
+  const edges: WaterfallEdge[] = (raw.edges as Array<Record<string, unknown>>)
+    .filter(
+      (e) =>
+        typeof e.id === "string" &&
+        typeof e.fromNodeId === "string" &&
+        typeof e.toNodeId === "string" &&
+        nodeIds.has(String(e.fromNodeId)) &&
+        nodeIds.has(String(e.toNodeId))
+    )
+    .map((e) => ({
+      id: String(e.id),
+      fromNodeId: String(e.fromNodeId),
+      toNodeId: String(e.toNodeId),
+      edgeType: validEdgeTypes.has(String(e.edgeType))
+        ? (String(e.edgeType) as WaterfallEdge["edgeType"])
+        : "select_from",
+      sqlStatement: String(e.sqlStatement || ""),
+      joinDetails: e.joinDetails ? String(e.joinDetails) : undefined,
+    }));
+
+  if (nodes.length === 0) {
+    throw new Error("Waterfall analysis produced no valid nodes");
+  }
+
+  return {
+    nodes,
+    edges,
+    summary: typeof raw.summary === "string" ? raw.summary : "",
   };
 }

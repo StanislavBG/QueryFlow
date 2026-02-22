@@ -274,6 +274,29 @@ export function useFormatQuery() {
   });
 }
 
+// ─── Waterfall Flow Analysis ─────────────────────────────────────────
+
+export function useWaterfallAnalysis() {
+  return useMutation<
+    import("@shared/waterfall").WaterfallAnalysis,
+    Error,
+    { content: string; dialect?: string }
+  >({
+    mutationFn: async ({ content, dialect }) => {
+      const res = await fetch(api.waterfall.analyze.path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, dialect }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Waterfall analysis failed" }));
+        throw new Error(err.message);
+      }
+      return res.json();
+    },
+  });
+}
+
 // ─── Agent Settings ──────────────────────────────────────────────────
 
 export function useAgentSettings() {
