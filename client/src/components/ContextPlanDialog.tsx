@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useAnalysisContext, type ContextBlock } from "@/hooks/use-sql-queries";
+import { MODEL } from "@/lib/models";
 import {
   Dialog,
   DialogContent,
@@ -61,12 +62,6 @@ const blockColorMap: Record<string, string> = {
   llm_status: "text-muted-foreground",
 };
 
-/** Friendly descriptions for blocks that might be confusing */
-const blockDescriptions: Record<string, string> = {
-  documents: "User-uploaded reference docs (Schemas tab → Documents). Sent as extra context to the LLM.",
-  schemas: "Parsed table/column definitions from your uploaded schemas.",
-  system_prompt: "Fixed instructions sent to the LLM (not editable).",
-};
 
 /** Rough token estimate: ~4 chars per token for English/SQL text */
 function estimateTokens(chars: number): number {
@@ -82,7 +77,7 @@ function ContextBlockRow({ block }: { block: ContextBlock }) {
   const [open, setOpen] = useState(false);
   const Icon = blockIconMap[block.key] || Activity;
   const color = blockColorMap[block.key] || "text-muted-foreground";
-  const description = blockDescriptions[block.key];
+  const description = block.description;
   const isShort = block.content.length < 100 && !block.content.includes("\n");
   const tokens = block.charCount ? estimateTokens(block.charCount) : estimateTokens(block.content.length);
 
@@ -162,8 +157,8 @@ export function ContextPlanDialog({ queryId, dialect, queryContent }: ContextPla
   // Calculate total estimated tokens across all context blocks
   const totalChars = blocks?.reduce((sum, b) => sum + (b.charCount || b.content.length), 0) || 0;
   const totalTokens = estimateTokens(totalChars);
-  const modelLimit = 16384;
-  const isOverLimit = totalTokens > modelLimit;
+  const contextLimit = MODEL.contextTokens; // 1M for GPT-4.1
+  const isOverLimit = totalTokens > contextLimit;
 
   return (
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -210,7 +205,7 @@ export function ContextPlanDialog({ queryId, dialect, queryContent }: ContextPla
               <span className="opacity-60 ml-1">({totalChars.toLocaleString()} chars)</span>
             </span>
             <span className="font-mono text-[10px]">
-              model max: {formatTokens(modelLimit)} output tokens
+              {MODEL.name} context: {formatTokens(contextLimit)}
             </span>
           </div>
         )}

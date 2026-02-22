@@ -395,7 +395,7 @@ export async function registerRoutes(
     const dialect = req.body.dialect || "Standard SQL";
 
     // Assemble all the same context the analyze pipeline would use
-    const blocks: Array<{ key: string; label: string; content: string; itemCount?: number; charCount?: number }> = [];
+    const blocks: Array<{ key: string; label: string; content: string; itemCount?: number; charCount?: number; description?: string }> = [];
 
     // 1. Query
     blocks.push({
@@ -430,6 +430,7 @@ export async function registerRoutes(
       blocks.push({
         key: "schemas",
         label: "Schema Definitions",
+        description: "Table and column definitions parsed from your uploaded schemas. Helps the LLM validate column references, types, and joins.",
         content: schemaContext,
         itemCount: schemas.length,
       });
@@ -440,7 +441,8 @@ export async function registerRoutes(
     if (docs.length > 0) {
       blocks.push({
         key: "documents",
-        label: "Reference Documents (user-uploaded)",
+        label: "Reference Documents",
+        description: "Uploaded via the Documents section in the Schemas tab. Sent as additional context to help the LLM understand your database environment.",
         content: docs.map(d => d.content).join("\n\n---\n\n"),
         itemCount: docs.length,
       });
@@ -495,7 +497,8 @@ export async function registerRoutes(
     const systemPromptChars = 2800;
     blocks.unshift({
       key: "system_prompt",
-      label: "System Prompt (analyzer instructions)",
+      label: "System Prompt",
+      description: "Fixed LLM instructions covering analysis rules, output format, and dialect handling. Not editable.",
       content: `~${systemPromptChars} characters of LLM instructions (dialect rules, output schema, category definitions)`,
       charCount: systemPromptChars,
     });
