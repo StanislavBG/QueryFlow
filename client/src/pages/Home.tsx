@@ -68,22 +68,31 @@ function DataPolicyModal({ open, onClose }: { open: boolean; onClose: () => void
             <div>
               <h3 className="text-foreground font-semibold mb-1 flex items-center gap-1.5">
                 <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
-                AI Processing via OpenAI (API / Developer Platform)
+                AI Processing via OpenAI
               </h3>
               <p>
                 QueryFlow sends your SQL queries, schema definitions, and associated context to
-                OpenAI through Replit's built-in OpenAI integration. This uses the <strong>API /
-                Developer Platform</strong> pathway — <strong>not</strong> the consumer ChatGPT
-                product. By using QueryFlow's AI features, you acknowledge and consent to this
-                data transmission.
+                OpenAI's <strong>API / Developer Platform</strong> for analysis, formatting, and
+                query generation. This is <strong>not</strong> the consumer ChatGPT product. By
+                using QueryFlow's AI features, you acknowledge and consent to this data
+                transmission.
               </p>
               <p className="mt-1.5">
-                Under OpenAI's API data usage policy, data sent through the API / Developer
+                Under OpenAI's API data usage policy, data submitted through the API / Developer
                 Platform is <strong>not used to train OpenAI models</strong> by default.
-                OpenAI may retain API inputs and outputs for up to 30 days for abuse and
-                misuse monitoring, after which it is deleted. For full details, see{" "}
+                OpenAI may retain API inputs and outputs for up to 30 days solely for abuse and
+                misuse monitoring, after which it is deleted.
+              </p>
+              <p className="mt-1.5 text-xs">
+                For full details, see{" "}
                 <a href="https://openai.com/policies/api-data-usage-policies" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                  OpenAI's API data usage policies
+                  OpenAI's API Data Usage Policies
+                </a>,{" "}
+                <a href="https://openai.com/policies/terms-of-use" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  OpenAI's Terms of Use
+                </a>, and{" "}
+                <a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  OpenAI's Privacy Policy
                 </a>.
               </p>
             </div>
@@ -109,10 +118,7 @@ function DataPolicyModal({ open, onClose }: { open: boolean; onClose: () => void
               <p className="mt-1.5">
                 Data sent to OpenAI via the API / Developer Platform is retained by OpenAI for
                 up to 30 days solely for abuse monitoring, then deleted. It is <strong>not used
-                for model training</strong>. See{" "}
-                <a href="https://openai.com/policies/api-data-usage-policies" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                  OpenAI's API data usage policies
-                </a>{" "}for details.
+                for model training</strong>.
               </p>
             </div>
           </div>
