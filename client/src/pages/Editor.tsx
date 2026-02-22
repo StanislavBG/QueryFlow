@@ -312,6 +312,88 @@ function makeDemoQuery(result: DemoBootstrapResult): SqlQuery {
 }
 
 // ---------------------------------------------------------------------------
+// Waterfall Detail Panel — right sidebar for visual tab
+// ---------------------------------------------------------------------------
+
+const EDGE_TYPE_LABELS: Record<string, { label: string; colorClass: string }> = {
+  join:           { label: "JOIN",            colorClass: "bg-blue-500/10 text-blue-500 border-blue-500/30" },
+  create_insert:  { label: "CREATE / INSERT", colorClass: "bg-emerald-500/10 text-emerald-500 border-emerald-500/30" },
+  cte_definition: { label: "CTE",            colorClass: "bg-purple-500/10 text-purple-500 border-purple-500/30" },
+  subquery_ref:   { label: "SUBQUERY",        colorClass: "bg-amber-500/10 text-amber-500 border-amber-500/30" },
+  select_from:    { label: "SELECT",          colorClass: "bg-muted text-muted-foreground" },
+};
+
+function WaterfallDetailPanel({
+  selectedEdge,
+  analysis,
+}: {
+  selectedEdge: import("@shared/waterfall").WaterfallEdge | null;
+  analysis: import("@shared/waterfall").WaterfallAnalysis | null;
+}) {
+  if (!selectedEdge || !analysis) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground px-6 text-center">
+        <Boxes className="w-8 h-8 mb-3 opacity-40" />
+        <p className="text-sm font-medium">Flow Detail</p>
+        <p className="text-xs mt-1 opacity-60">
+          Hover or click a connector in the waterfall to see the SQL statement
+          that moves data between tables.
+        </p>
+      </div>
+    );
+  }
+
+  const fromNode = analysis.nodes.find((n) => n.id === selectedEdge.fromNodeId);
+  const toNode = analysis.nodes.find((n) => n.id === selectedEdge.toNodeId);
+  const edgeMeta = EDGE_TYPE_LABELS[selectedEdge.edgeType] || EDGE_TYPE_LABELS.select_from;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-border bg-card">
+        <div className="flex items-center gap-2 mb-2">
+          <Badge
+            variant="outline"
+            className={`text-[10px] h-5 px-2 ${edgeMeta.colorClass}`}
+          >
+            {edgeMeta.label}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="font-mono font-semibold text-foreground">
+            {fromNode?.name || "?"}
+          </span>
+          <span className="text-muted-foreground">→</span>
+          <span className="font-mono font-semibold text-foreground">
+            {toNode?.name || "?"}
+          </span>
+        </div>
+      </div>
+
+      {/* SQL statement */}
+      <div className="flex-1 overflow-auto p-4">
+        {selectedEdge.joinDetails && (
+          <div className="mb-3">
+            <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+              Join Condition
+            </h4>
+            <p className="text-xs font-mono text-foreground bg-muted/50 rounded px-2 py-1">
+              {selectedEdge.joinDetails}
+            </p>
+          </div>
+        )}
+        <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+          SQL Statement
+        </h4>
+        <pre className="text-xs font-mono text-foreground bg-muted/50 rounded p-3 whitespace-pre-wrap break-words overflow-auto max-h-[60vh] border border-border">
+          {selectedEdge.sqlStatement || "No SQL captured for this connection."}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Editor page
 // ---------------------------------------------------------------------------
 
@@ -359,6 +441,10 @@ export default function Editor() {
 
   // Schema drill-down selection state (for schemas tab)
   const [schemaSelection, setSchemaSelection] = useState<SchemaSelection | null>(null);
+
+  // Waterfall flow state (for visual tab)
+  const [waterfallAnalysis, setWaterfallAnalysis] = useState<import("@shared/waterfall").WaterfallAnalysis | null>(null);
+  const [selectedWaterfallEdge, setSelectedWaterfallEdge] = useState<import("@shared/waterfall").WaterfallEdge | null>(null);
 
   // Hover/cursor linking state between editor and feedback panel
   const [hoveredEditorLine, setHoveredEditorLine] = useState<number | null>(null);
@@ -798,6 +884,10 @@ GROUP BY 1 ORDER BY 1`}
                   <VisualExplorer
                     queryContent={resolvedQueryContent}
                     schemas={schemaData}
+                    dialect={detectedDialect}
+                    onEdgeSelect={setSelectedWaterfallEdge}
+                    selectedEdgeId={selectedWaterfallEdge?.id ?? null}
+                    onAnalysisComplete={setWaterfallAnalysis}
                   />
                 )}
               </div>
@@ -946,6 +1036,10 @@ GROUP BY 1 ORDER BY 1`}
                     <VisualExplorer
                       queryContent={resolvedQueryContent}
                       schemas={schemaData}
+                      dialect={detectedDialect}
+                      onEdgeSelect={setSelectedWaterfallEdge}
+                      selectedEdgeId={selectedWaterfallEdge?.id ?? null}
+                      onAnalysisComplete={setWaterfallAnalysis}
                     />
                   </div>
                 )}
@@ -983,13 +1077,10 @@ GROUP BY 1 ORDER BY 1`}
               )}
 
               {activeTab.type === "visual" && (
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground px-6 text-center">
-                  <Boxes className="w-8 h-8 mb-3 opacity-40" />
-                  <p className="text-sm font-medium">Visual Properties</p>
-                  <p className="text-xs mt-1 opacity-60">
-                    Select tables and transformations in the visual view to inspect and edit their properties.
-                  </p>
-                </div>
+                <WaterfallDetailPanel
+                  selectedEdge={selectedWaterfallEdge}
+                  analysis={waterfallAnalysis}
+                />
               )}
             </div>
           </ResizablePanel>
