@@ -289,7 +289,7 @@ export async function registerRoutes(
 
     try {
       // Step 1: Generate recommendations
-      sendEvent({ step: 1, total: 2, label: "Analyzing query" });
+      sendEvent({ step: 1, total: 3, label: "Analyzing query" });
       const llmResults = await llmAnalyzeQuery(sqlContent, {
         dialect,
         schemas: schemaContext,
@@ -299,7 +299,7 @@ export async function registerRoutes(
       });
 
       // Step 2: Independent QA validation
-      sendEvent({ step: 2, total: 2, label: "Validating recommendations" });
+      sendEvent({ step: 2, total: 3, label: "Validating recommendations" });
       const validated = await llmValidateRecommendations(
         sqlContent,
         llmResults,
@@ -322,6 +322,39 @@ export async function registerRoutes(
         };
       });
 
+      // Step 3: Waterfall flow analysis (runs in parallel with feedback save)
+      sendEvent({ step: 3, total: 3, label: "Building visual flow" });
+      let waterfallResult: { analysis: WaterfallAnalysis; conflicts: any[]; newNodes: string[]; removedNodes: string[] } | null = null;
+      try {
+        const llmWaterfall = await llmAnalyzeWaterfall(sqlContent, {
+          dialect,
+          schemas: schemaContext,
+        });
+
+        // Merge with existing user-evolved data if available
+        if (!isDemoMode) {
+          const query = await storage.getSqlQuery(queryId);
+          if (query?.waterfallData) {
+            const merged = mergeWaterfallAnalysis(
+              query.waterfallData as WaterfallAnalysis,
+              llmWaterfall
+            );
+            await storage.updateSqlQuery(queryId, { waterfallData: merged.analysis } as any);
+            waterfallResult = merged;
+          } else {
+            await storage.updateSqlQuery(queryId, { waterfallData: llmWaterfall } as any);
+            waterfallResult = { analysis: llmWaterfall, conflicts: [], newNodes: [], removedNodes: [] };
+          }
+        } else {
+          waterfallResult = { analysis: llmWaterfall, conflicts: [], newNodes: [], removedNodes: [] };
+        }
+      } catch (wfErr) {
+        // Waterfall failure is non-fatal — log but continue
+        const wfMsg = wfErr instanceof Error ? wfErr.message : String(wfErr);
+        console.warn("[analyze] Waterfall step failed (non-fatal):", wfMsg);
+        logLlmError("waterfall", wfMsg, { inputPreview: sqlContent?.slice(0, 300) });
+      }
+
       if (isDemoMode) {
         // Demo mode: return virtual results without persisting to DB
         const virtualResults = feedbackItems.map((item, idx) => ({
@@ -329,10 +362,10 @@ export async function registerRoutes(
           id: -(idx + 1),
           createdAt: new Date(),
         }));
-        sendEvent({ done: true, results: virtualResults });
+        sendEvent({ done: true, results: virtualResults, waterfall: waterfallResult });
       } else {
         const created = await storage.createFeedbackBatch(feedbackItems);
-        sendEvent({ done: true, results: created });
+        sendEvent({ done: true, results: created, waterfall: waterfallResult });
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
