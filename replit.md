@@ -98,7 +98,7 @@ Preferred communication style: Simple, everyday language.
 - **PostgreSQL** — Primary database (provisioned via Replit or external provider)
 
 ### Key NPM Dependencies
-- `drizzle-orm` — Database ORM for type-safe queries (NO migration tooling — see Migration Strategy above)
+- `drizzle-orm` — Database ORM for type-safe queries only (no CLI/migration companion package)
 - `express` — HTTP server framework
 - `@tanstack/react-query` — Client-side data fetching and caching
 - `zod` + `drizzle-zod` — Schema validation
@@ -112,7 +112,7 @@ Preferred communication style: Simple, everyday language.
 
 ### Important: No Migration Tooling
 
-This project does **NOT** use `drizzle-kit`, Prisma Migrate, or any other migration tool. **Do not install or reference `drizzle-kit`** in this file, in `package.json`, or anywhere else. Replit's deployment provisioner reads this file and may auto-generate destructive SQL migrations (DROP TABLE, DROP COLUMN) if it detects migration tooling references.
+This project does **NOT** use any database migration tool (no Prisma Migrate, no ORM CLI tools, nothing). All database schema changes are managed exclusively through `ensureTables()` in `server/db.ts`. Do not install or reference any migration CLI tool in this file, in `package.json`, or anywhere else.
 
 All database schema changes are managed through `ensureTables()` in `server/db.ts`, which runs on every server start and uses only safe, idempotent DDL statements:
 - `CREATE TABLE IF NOT EXISTS` for new tables
@@ -125,6 +125,6 @@ All database schema changes are managed through `ensureTables()` in `server/db.t
 4. Click **Deploy** — the build script runs `npm run build` and starts the server
 
 ### Common Issues
-- **Destructive migration prompts**: If Replit shows a migration with `DROP TABLE` or `DROP COLUMN`, **always cancel it**. This means something in the project config is triggering Replit's migration provisioner. Check that `drizzle-kit` is not referenced anywhere.
+- **Destructive migration prompts**: If Replit shows a migration with `DROP TABLE` or `DROP COLUMN`, **always cancel it**. This project manages schema exclusively via `ensureTables()` — no external migration tool should ever run.
 - **New columns not appearing**: `ensureTables()` handles this automatically on restart. If the column exists in `shared/schema.ts` and `server/db.ts`, it will be created on the next deploy.
 - **Column renames or type changes**: These require a manual `ALTER TABLE` statement run in the Replit Database tab or Shell. `ensureTables()` cannot handle renames — only additions.
