@@ -25,6 +25,9 @@ export interface WaterfallNode {
   nodeType: WaterfallNodeType;
   columns?: string[];            // key columns involved
   stepIndex: number;             // vertical ordering (0 = top)
+  isShadow?: boolean;            // true for ghost copies shown at step 0
+  displayStepIndex?: number;     // step where the node is first introduced (for layout)
+  userModified?: boolean;        // true if user has manually edited this node
 }
 
 /** A directed edge in the waterfall DAG */
@@ -35,6 +38,7 @@ export interface WaterfallEdge {
   edgeType: WaterfallEdgeType;
   sqlStatement: string;          // actual SQL shown in right panel on hover
   joinDetails?: string;          // for JOIN edges: e.g. "INNER JOIN ON a.id = b.id"
+  userModified?: boolean;        // true if user has manually edited this edge
 }
 
 /** Full waterfall analysis result from the LLM */
@@ -42,4 +46,24 @@ export interface WaterfallAnalysis {
   nodes: WaterfallNode[];
   edges: WaterfallEdge[];
   summary: string;               // brief natural-language description of the flow
+}
+
+// ---------------------------------------------------------------------------
+// Merge types — used when re-analyzing a query that has user-evolved data
+// ---------------------------------------------------------------------------
+
+export interface MergeConflict {
+  type: "node" | "edge";
+  name: string;                  // human-readable identifier (e.g., table name or edge label)
+  field: string;                 // which field differs
+  userValue: string;             // what the user has
+  llmValue: string;              // what the LLM now says
+  resolution: "kept_user";       // user always wins
+}
+
+export interface WaterfallMergeResult {
+  analysis: WaterfallAnalysis;
+  conflicts: MergeConflict[];
+  newNodes: string[];            // names of nodes added from the new analysis
+  removedNodes: string[];        // names of nodes in old data but not in new (kept)
 }
