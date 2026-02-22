@@ -523,7 +523,6 @@ export default function Editor() {
                         onContentChange={handleContentChange}
                         maxChars={MODEL.maxQueryChars}
                         modelName={MODEL.name}
-                        dialect={detectedDialect}
                         highlightedLines={editorHighlightedLines}
                         onLineHover={handleEditorLineHover}
                         onCursorLineChange={handleCursorLineChange}
