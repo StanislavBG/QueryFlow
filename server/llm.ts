@@ -196,9 +196,9 @@ export async function llmAnalyzeQuery(
     ? `\nThe user has prioritized the following analysis areas (emphasize these in your output, but still report critical findings in other areas):\n${enabledCategories.map(c => `- ${c}`).join("\n")}`
     : "";
 
-  // Scale max_tokens based on input size: short queries get 16k, large procedures/batches get 32k
+  // Scale max_tokens based on input size: short queries get 32k, large procedures/batches get 64k
   const sqlLineCount = sql.split("\n").length;
-  const maxTokens = sqlLineCount >= 100 ? 32768 : 16384;
+  const maxTokens = sqlLineCount >= 100 ? 65536 : 32768;
 
   const response = await openai.chat.completions.create({
     model: MODEL,
@@ -252,13 +252,15 @@ Return a JSON array of feedback items. Each item must have:
   - "info" — suggestions, observations, alternative approaches
   - "success" — acknowledgment of good practices
 - "title": string — short, specific title (under 60 chars)
-- "message": string — **in-depth explanation** (minimum 4-6 sentences). This is the primary value the analyst reads. Explain:
-  (a) exactly what the problem or opportunity is, referencing specific table names, column names, clauses, and line numbers;
-  (b) WHY it matters — what is the concrete business/performance/correctness/security impact if left unchanged;
-  (c) the underlying principle (e.g., sargability, index usage, NULL propagation, set-based thinking, data integrity);
-  (d) any caveats, trade-offs, or edge cases the analyst should be aware of.
-  Write for a seasoned business analyst or DBA — be precise, cite specifics, avoid generic advice.
-- "suggestion": string | null — actionable text explanation of the recommended change (2-3 sentences minimum)
+- "message": string — **comprehensive, in-depth explanation** (minimum 8-12 sentences). This is the primary analytical value the reader consumes — length is NOT an issue, thoroughness IS. Structure each message as a mini-essay covering ALL of the following:
+  (a) exactly what the problem or opportunity is, referencing specific table names, column names, clauses, and line numbers in the input;
+  (b) WHY it matters — the concrete business, performance, correctness, or security impact if left unchanged, with realistic scenarios (e.g., "on a 10M-row orders table, this full scan could take 30+ seconds");
+  (c) the underlying SQL principle or database internals concept (e.g., sargability, index usage, NULL three-valued logic, set-based vs row-based thinking, cardinality estimation, predicate pushdown, lock contention);
+  (d) how the issue manifests at scale or under edge conditions the analyst may not have considered (empty result sets, NULLs in join keys, data skew, concurrent writes);
+  (e) any caveats, trade-offs, or situations where the current approach might actually be acceptable;
+  (f) connection to related findings in this analysis or broader query design patterns.
+  Write for a seasoned business analyst or DBA — be precise, cite specifics, avoid generic advice. Every sentence should add concrete analytical value.
+- "suggestion": string | null — actionable, detailed text explanation of the recommended change (4-6 sentences minimum). Explain not just WHAT to change but WHY this specific fix works, how it interacts with the rest of the query, and any implementation considerations (e.g., index requirements, NULL handling implications, dialect-specific syntax). Include concrete reasoning the analyst can use to justify the change to stakeholders.
 - "beforeSql": string | null — the FULL relevant section/clause of the original query that this finding relates to (not just the single changed token — include enough surrounding SQL for the analyst to immediately recognize the code section in context: the full SELECT list, the full JOIN + ON clause, the full WHERE block, the full CTE, etc.)
 - "afterSql": string | null — the rewritten version of the SAME full section showing the recommended change in context
 - "lineNumber": number | null — 1-indexed line number in the original input where this section begins
@@ -267,7 +269,7 @@ Return a JSON array of feedback items. Each item must have:
 - **Be thorough**: There is no hard cap on findings. Report every significant issue. For a simple query, 3-8 items is typical. For complex stored procedures or multi-statement batches, produce as many findings as warranted — 15, 20, or more if the input justifies it. Never pad with low-value observations; every item must be high-signal.
 - **Priority ordering**: Return items in descending order of importance. Errors and bugs first, then warnings, then informational items. Within the same severity, front-load the highest-impact findings.
 - **Before/after SQL — FULL CONTEXT**: For every suggestion that modifies SQL, include "beforeSql" and "afterSql". These MUST contain the full relevant clause or section, NOT just the single changed line. An analyst looking at the before/after side-by-side should be able to understand the change without needing to look at the original query. Include the full SELECT clause, the full JOIN block, the full WHERE predicate tree, or the full CTE — whatever logical unit contains the change. Set both to null only for observations with no concrete SQL change.
-- **Deep explanations**: The "message" field is the core analytical value. A one-sentence message is NEVER acceptable. Always explain the "why" — the performance characteristic, the data integrity risk, the execution plan implication, the standard being violated, or the business logic concern. Reference specific tables, columns, and line numbers. Cite the underlying SQL principle.
+- **Deep, thorough explanations**: The "message" field is the core analytical value — it should read like a detailed analyst's note, NOT a terse lint warning. A message under 6 sentences is NEVER acceptable. Always explain the "why" and the "so what" — the performance characteristic, the data integrity risk, the execution plan implication, the standard being violated, or the business logic concern. Ground every point in specifics: reference exact table names, column names, line numbers, and SQL clauses. Cite the underlying SQL principle or database internals concept. Include realistic scale/impact estimates where applicable (e.g., row counts, scan costs, lock duration). Connect findings to broader patterns when relevant. The analyst should come away with a thorough understanding of the issue, not just awareness that it exists.
 - **Specificity**: Reference exact column names, table names, clauses, and line numbers. Never make generic statements like "consider optimizing this query."
 - **At least one success**: If the query has any good practices, acknowledge them with a substantive explanation of why that pattern is good.
 - **Do not repeat**: Skip suggestions the user has already accepted.
