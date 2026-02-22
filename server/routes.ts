@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
 import { formatSQL } from "./formatter";
-import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, llmGenerateQueryFromVoice } from "./llm";
+import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, llmGenerateQueryFromVoice, llmAnalyzeWaterfall } from "./llm";
 import { requireAdmin, resolveAppUser, logActivity } from "./auth";
 
 // All available analysis categories
@@ -524,6 +524,41 @@ export async function registerRoutes(
       } catch {
         throw err;
       }
+    }
+  });
+
+  // ─── Waterfall Flow Analysis ──────────────────────────────────────
+
+  app.post(api.waterfall.analyze.path, async (req, res) => {
+    try {
+      const input = api.waterfall.analyze.input.parse(req.body);
+
+      if (!isLLMConfigured()) {
+        return res.status(503).json({ message: "LLM is not configured. Add AI_INTEGRATIONS_OPENAI_API_KEY to enable waterfall analysis." });
+      }
+
+      const { userId: wfUserId } = getAuth(req);
+      logActivity(wfUserId, "waterfall.analyze", "waterfall");
+
+      // Gather schema context for richer analysis
+      const schemas = await storage.getUserSchemas();
+      const schemaContext = await buildSchemaContext(schemas);
+
+      const result = await llmAnalyzeWaterfall(input.content, {
+        dialect: input.dialect,
+        schemas: schemaContext,
+      });
+
+      res.json(result);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          message: err.errors[0].message,
+          field: err.errors[0].path.join('.'),
+        });
+      }
+      console.error("[waterfall] Analysis failed:", err);
+      res.status(500).json({ message: err instanceof Error ? err.message : "Waterfall analysis failed" });
     }
   });
 

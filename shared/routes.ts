@@ -10,6 +10,7 @@ import {
   updateAgentSettingsSchema,
   schemaVoiceContext,
 } from './schema';
+import type { WaterfallAnalysis } from './waterfall';
 
 export const errorSchemas = {
   validation: z.object({
@@ -180,6 +181,21 @@ export const api = {
       responses: {
         200: z.object({ transcript: z.string() }),
         400: errorSchemas.validation,
+      },
+    },
+  },
+
+  waterfall: {
+    analyze: {
+      method: 'POST' as const,
+      path: '/api/sql-queries/waterfall-analysis' as const,
+      input: z.object({
+        content: z.string().min(1),
+        dialect: z.string().optional(),
+      }),
+      responses: {
+        200: z.custom<WaterfallAnalysis>(),
+        503: errorSchemas.internal,
       },
     },
   },

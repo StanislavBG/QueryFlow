@@ -49,6 +49,7 @@ Preferred communication style: Simple, everyday language.
   - `POST /api/schemas/:schemaId/voice-context/transcribe` — Audio transcription
   - `GET/POST/DELETE /api/chat` — AI chat messages
   - `POST /api/ask` — One-off LLM Q&A about a query
+  - `POST /api/sql-queries/waterfall-analysis` — LLM-based waterfall flow analysis: decomposes SQL into a DAG of source tables, CTEs, temp tables, and final output with data-flow edges
   - `POST /api/demo/bootstrap` — Return a random pre-seeded demo version (schema + flawed query). No auth required, no DB writes to sql_queries/user_schemas
   - `POST /api/demo/seed` — Admin-only: generate and store one demo version (up to 10 total)
 
