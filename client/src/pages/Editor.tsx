@@ -306,6 +306,7 @@ function makeDemoQuery(result: DemoBootstrapResult): SqlQuery {
     content: result.query.content,
     draftContent: null,
     formattedContent: null,
+    waterfallData: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -1463,6 +1464,7 @@ GROUP BY 1 ORDER BY 1`}
                 {leftTab === "visual" && (
                   <VisualExplorer
                     queryContent={resolvedQueryContent}
+                    queryId={effectiveQueryId}
                     schemas={schemaData}
                     dialect={detectedDialect}
                     onEdgeSelect={setSelectedWaterfallEdge}

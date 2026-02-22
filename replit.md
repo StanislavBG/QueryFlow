@@ -49,7 +49,9 @@ Preferred communication style: Simple, everyday language.
   - `POST /api/schemas/:schemaId/voice-context/transcribe` — Audio transcription
   - `GET/POST/DELETE /api/chat` — AI chat messages
   - `POST /api/ask` — One-off LLM Q&A about a query
-  - `POST /api/sql-queries/waterfall-analysis` — LLM-based waterfall flow analysis: decomposes SQL into a DAG of source tables, CTEs, temp tables, and final output with data-flow edges
+  - `POST /api/sql-queries/waterfall-analysis` — LLM-based waterfall flow analysis: decomposes SQL into a DAG of source tables, CTEs, temp tables, and final output with data-flow edges. Accepts optional `queryId` to merge new analysis with user-evolved data
+  - `GET /api/sql-queries/:id/waterfall` — Get stored waterfall analysis for a query
+  - `PUT /api/sql-queries/:id/waterfall` — Save user-modified waterfall analysis data
   - `POST /api/demo/bootstrap` — Return a random pre-seeded demo version (schema + flawed query). No auth required, no DB writes to sql_queries/user_schemas
   - `POST /api/demo/seed` — Admin-only: generate and store one demo version (up to 10 total)
 
@@ -60,7 +62,7 @@ Preferred communication style: Simple, everyday language.
 - **Migration Strategy**: `ensureTables()` in `server/db.ts` runs `CREATE TABLE IF NOT EXISTS` and `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` on every server start. **No migration tooling is used** — all schema management is handled by this function
 - **Tables**:
   - `documents` — Generic content documents (text/json/markdown)
-  - `sql_queries` — User SQL queries with optional formatted/draft content, scoped by `user_id`
+  - `sql_queries` — User SQL queries with optional formatted/draft content, scoped by `user_id`. Includes `waterfall_data` JSONB column for persisted waterfall flow analysis
   - `query_feedback` — AI-generated feedback items linked to queries (severity, category, suggestions, metadata JSONB for extra LLM fields like beforeSql/afterSql, isDismissed for three-way feedback state)
   - `agent_settings` — Per-agent-type configuration (enabled/disabled, priority level, config JSONB)
   - `user_schemas` — User-uploaded database schema definitions (DDL, parsed tables/columns JSONB, description)

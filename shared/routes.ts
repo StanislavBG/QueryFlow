@@ -10,7 +10,7 @@ import {
   updateAgentSettingsSchema,
   schemaVoiceContext,
 } from './schema';
-import type { WaterfallAnalysis } from './waterfall';
+import type { WaterfallAnalysis, WaterfallMergeResult } from './waterfall';
 
 export const errorSchemas = {
   validation: z.object({
@@ -192,10 +192,32 @@ export const api = {
       input: z.object({
         content: z.string().min(1),
         dialect: z.string().optional(),
+        queryId: z.number().optional(),
+      }),
+      responses: {
+        200: z.custom<WaterfallMergeResult>(),
+        503: errorSchemas.internal,
+      },
+    },
+    save: {
+      method: 'PUT' as const,
+      path: '/api/sql-queries/:id/waterfall' as const,
+      input: z.object({
+        nodes: z.array(z.any()),
+        edges: z.array(z.any()),
+        summary: z.string(),
       }),
       responses: {
         200: z.custom<WaterfallAnalysis>(),
-        503: errorSchemas.internal,
+        404: errorSchemas.notFound,
+      },
+    },
+    get: {
+      method: 'GET' as const,
+      path: '/api/sql-queries/:id/waterfall' as const,
+      responses: {
+        200: z.custom<WaterfallAnalysis | null>(),
+        404: errorSchemas.notFound,
       },
     },
   },
