@@ -1,5 +1,18 @@
 # QueryFlow — Project Guidelines
 
+## Target User Persona
+
+The primary user of QueryFlow is a **senior production SQL analyst** with 40+ years of experience. This shapes every design and implementation decision:
+
+- **Their SQL is battle-tested.** These analysts have written and refined their queries over years of production use. The business accuracy of their SQL has been validated through real-world results. They are not beginners making common mistakes — they are experts who have deliberately chosen every construct.
+- **Their livelihood depends on their queries.** These are not academic exercises. The SQL they write drives business decisions, financial reporting, and operational processes. A wrong suggestion that silently changes query behavior could cost real money and real jobs.
+- **They review code all day.** Trivial observations ("use uppercase keywords") or generic advice ("consider indexing") will be immediately dismissed and will erode trust in the product. Every finding must provide specific, non-obvious, verifiable value.
+- **Trust is earned, not assumed.** QueryFlow is under immense scrutiny. One incorrect recommendation — especially one that changes query semantics — will cause the analyst to lose trust in the entire tool. We must maintain a strict path of validation, testing, and assurance before any suggestion reaches the user.
+- **Before/After must be verifiable.** The analyst will carefully compare before and after SQL character-by-character. Summarized or abbreviated SQL (using "..." or placeholders) is unacceptable — they cannot verify logical equivalence against something that hides the actual code. Every token must be real.
+- **Proof of equivalence is mandatory.** When suggesting a structural change (CTEs instead of subqueries, refactored JOINs, etc.), the recommendation must explicitly explain WHY the result set is identical — covering NULL handling, row ordering, duplicate treatment, and edge cases. The analyst will not blindly accept a restructured query.
+
+**Design principle:** When in doubt, flag as informational rather than making an overconfident recommendation. It is far better to say "consider this" than to incorrectly assert "do this."
+
 ## Architecture Principles
 
 - **All buttons, parsers, and smart features must be LLM-based.** Do not write local heuristic/regex parsing logic or rule-based feature implementations. Any intelligent behavior (schema parsing, format detection, query analysis, etc.) should go through an LLM call.
