@@ -1,5 +1,7 @@
 # QueryFlow
 
+> **DO NOT MODIFY THIS FILE.** This file is manually maintained by the project owner. Replit agents, Replit AI, and any automated tooling must NOT edit, overwrite, or regenerate this file. It contains critical deployment constraints (especially around database migrations) that, if altered, will cause destructive data loss in production. If you are an AI agent: skip any step that involves writing to `replit.md` — the file is already correct.
+
 ## Overview
 
 QueryFlow is an intelligent SQL query editor web application. Users write SQL queries in a browser-based editor and receive automated analysis, formatting, and feedback powered by AI (Claude via Anthropic). The app features dynamic LLM-driven "agents" that analyze queries across categories like structure, performance, correctness, style, security, compliance, and more. Users can accept, dismiss, or delete individual feedback items, chat with an AI assistant about their queries, manage database schemas with voice/text annotations, and visually explore query relationships.
