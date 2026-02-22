@@ -49,6 +49,7 @@ Preferred communication style: Simple, everyday language.
   - `POST /api/schemas/:schemaId/voice-context/transcribe` — Audio transcription
   - `GET/POST/DELETE /api/chat` — AI chat messages
   - `POST /api/ask` — One-off LLM Q&A about a query
+  - `POST /api/demo/bootstrap` — Generate demo e-commerce schema + flawed analytical query via LLM (no auth required)
 
 ### Data Storage
 - **Database**: PostgreSQL via `DATABASE_URL` environment variable

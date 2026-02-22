@@ -231,6 +231,29 @@ export function useDismissFeedback() {
   });
 }
 
+// ─── Demo Bootstrap ──────────────────────────────────────────────────
+
+export function useDemoBootstrap() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { queryId: number; schemaId: number; query: SqlQuery; schema: UserSchema },
+    Error
+  >({
+    mutationFn: async () => {
+      const res = await fetch("/api/demo/bootstrap", { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Demo generation failed" }));
+        throw new Error(err.message);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sql-queries"] });
+      queryClient.invalidateQueries({ queryKey: ["schemas"] });
+    },
+  });
+}
+
 // ─── Format ──────────────────────────────────────────────────────────
 
 export function useFormatQuery() {

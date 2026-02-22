@@ -27,7 +27,7 @@ import {
   Lightbulb,
   Tag,
 } from "lucide-react";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import type { QueryFeedbackRow } from "@shared/schema";
 
 const severityConfig = {
@@ -361,18 +361,33 @@ interface FeedbackPanelProps {
   onFeedbackHover?: (lineNumbers: Set<number>) => void;
   onApplySuggestion?: (beforeSql: string, afterSql: string) => void;
   onScrollToLine?: (line: number) => void;
+  autoAnalyze?: boolean;
+  onAutoAnalyzed?: () => void;
 }
 
-export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, activeLine, onFeedbackHover, onApplySuggestion, onScrollToLine }: FeedbackPanelProps) {
+export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, activeLine, onFeedbackHover, onApplySuggestion, onScrollToLine, autoAnalyze, onAutoAnalyzed }: FeedbackPanelProps) {
   const { data: feedback, isLoading: isFeedbackLoading } = useQueryFeedback(queryId);
   const { progress: analysisProgress, ...analyzeMutation } = useAnalyzeQuery();
   const [filter, setFilter] = useState<string | null>(null);
+  const autoAnalyzeTriggered = useRef(false);
 
   const handleAnalyze = () => {
     if (queryId) {
       analyzeMutation.mutate({ queryId, dialect, content: queryContent });
     }
   };
+
+  // Auto-trigger analysis when requested (e.g., after demo bootstrap)
+  useEffect(() => {
+    if (autoAnalyze && queryId && queryContent?.trim() && !analyzeMutation.isPending && !autoAnalyzeTriggered.current) {
+      autoAnalyzeTriggered.current = true;
+      analyzeMutation.mutate({ queryId, dialect, content: queryContent });
+      onAutoAnalyzed?.();
+    }
+    if (!autoAnalyze) {
+      autoAnalyzeTriggered.current = false;
+    }
+  }, [autoAnalyze, queryId, queryContent]);
 
   const handleFeedbackHover = useCallback((feedbackId: number | null) => {
     if (!feedback || !onFeedbackHover) return;
