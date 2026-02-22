@@ -1020,9 +1020,16 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
   app.post("/api/voice-to-query", async (req, res) => {
     try {
       const input = z.object({
-        transcript: z.string().min(1),
+        transcript: z.string().trim().min(1).max(10000),
         dialect: z.string().optional(),
       }).parse(req.body);
+
+      const { userId } = getAuth(req);
+
+      // Require authentication — voice-to-query uses user-scoped data
+      if (!userId) {
+        return res.status(401).json({ message: "Authentication required for voice-to-query." });
+      }
 
       if (!isLLMConfigured()) {
         return res.status(503).json({
@@ -1030,18 +1037,18 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
         });
       }
 
-      const { userId } = getAuth(req);
       logActivity(userId, "voice.query", "query");
 
-      // Gather full context: schemas + voice annotations
-      const schemas = await storage.getUserSchemas(userId || undefined);
+      // Gather full context: schemas + voice annotations (user-scoped)
+      const schemas = await storage.getUserSchemas(userId);
       const schemaContext = await buildSchemaContext(schemas);
 
-      // Gather all existing queries for pattern learning
-      const existingQueries = await storage.getSqlQueries(userId || undefined);
+      // Gather recent existing queries for pattern learning (bounded to 20 most recent)
+      const existingQueries = await storage.getSqlQueries(userId);
       const queryContext = existingQueries
         .filter((q) => q.content && q.content.trim().length > 0)
-        .map((q) => ({ title: q.title, content: q.content }));
+        .slice(0, 20)
+        .map((q) => ({ title: q.title, content: q.content.slice(0, 2000) }));
 
       const result = await llmGenerateQueryFromVoice(input.transcript, {
         dialect: input.dialect,

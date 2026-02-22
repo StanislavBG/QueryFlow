@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { useUserSchemas, useSchemaVoiceContexts, useUpdateUserSchema } from "@/hooks/use-sql-queries";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,22 @@ function sortColumns(columns: ParsedColumn[]): ParsedColumn[] {
     if (!a.isPrimaryKey && b.isPrimaryKey) return 1;
     return a.name.localeCompare(b.name);
   });
+}
+
+/** Format a Date or ISO string to a short readable timestamp. */
+function formatTimestamp(ts?: Date | string): string | null {
+  if (!ts) return null;
+  const d = typeof ts === "string" ? new Date(ts) : ts;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) +
+    " " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+/** Generate a unique name that doesn't collide with existing names. */
+function uniqueName(prefix: string, existingNames: string[]): string {
+  const nameSet = new Set(existingNames.map((n) => n.toLowerCase()));
+  let i = existingNames.length + 1;
+  while (nameSet.has(`${prefix}${i}`.toLowerCase())) i++;
+  return `${prefix}${i}`;
 }
 
 interface SchemaDetailViewProps {
@@ -60,6 +76,9 @@ function SchemaOverview({
   const updateMutation = useUpdateUserSchema();
   const { toast } = useToast();
 
+  // Sync edit state when schema.name changes externally
+  useEffect(() => { setEditName(schema.name); }, [schema.name]);
+
   const handleSaveName = useCallback(() => {
     const trimmed = editName.trim();
     if (!trimmed || trimmed === schema.name) {
@@ -82,8 +101,9 @@ function SchemaOverview({
   }, [editName, schema.id, schema.name, updateMutation, toast]);
 
   const handleAddTable = useCallback(() => {
+    const name = uniqueName("new_table_", tables.map((t) => t.name));
     const newTable: ParsedTable = {
-      name: `new_table_${tables.length + 1}`,
+      name,
       columns: [{ name: "id", type: "INT", isPrimaryKey: true }],
       relationships: [],
     };
@@ -96,13 +116,6 @@ function SchemaOverview({
     );
   }, [schema.id, tables, updateMutation, toast]);
 
-  const formatTimestamp = (ts?: Date | string) => {
-    if (!ts) return null;
-    const d = typeof ts === "string" ? new Date(ts) : ts;
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) +
-      " " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  };
-
   return (
     <div className="p-6 space-y-6">
       {/* Schema header */}
@@ -111,6 +124,7 @@ function SchemaOverview({
           variant="ghost"
           size="sm"
           className="h-7 w-7 p-0"
+          aria-label="Back to schema list"
           onClick={() => onNavigate?.(null)}
         >
           <ChevronLeft className="w-4 h-4" />
@@ -127,12 +141,13 @@ function SchemaOverview({
                   if (e.key === "Escape") { setIsEditingName(false); setEditName(schema.name); }
                 }}
                 className="h-7 text-sm font-semibold"
+                aria-label="Schema name"
                 autoFocus
               />
-              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSaveName}>
+              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" aria-label="Save name" onClick={handleSaveName} disabled={updateMutation.isPending}>
                 <Check className="w-3.5 h-3.5 text-emerald-500" />
               </Button>
-              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => { setIsEditingName(false); setEditName(schema.name); }}>
+              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" aria-label="Cancel editing" onClick={() => { setIsEditingName(false); setEditName(schema.name); }}>
                 <X className="w-3.5 h-3.5 text-muted-foreground" />
               </Button>
             </div>
@@ -146,6 +161,7 @@ function SchemaOverview({
               </h2>
               <button
                 onClick={() => setIsEditingName(true)}
+                aria-label="Rename schema"
                 className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-accent/50 transition-all"
               >
                 <Pencil className="w-3 h-3 text-muted-foreground" />
@@ -173,11 +189,11 @@ function SchemaOverview({
 
       {/* Table cards grid */}
       <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${Math.min(Math.ceil(Math.sqrt(tables.length)), 3)}, minmax(200px, 1fr))` }}>
-        {tables.map((table, i) => {
+        {tables.map((table) => {
           const sorted = sortColumns(table.columns);
           return (
             <button
-              key={i}
+              key={table.name}
               onClick={() => onNavigate?.({ schemaId: schema.id, tableName: table.name })}
               className="rounded-lg border border-border bg-card shadow-sm overflow-hidden text-left hover:border-primary/50 hover:shadow-md transition-all"
             >
@@ -187,8 +203,8 @@ function SchemaOverview({
                 <Badge variant="secondary" className="text-[9px] h-4 ml-auto">{table.columns.length} cols</Badge>
               </div>
               <div className="p-2">
-                {sorted.slice(0, 5).map((col, ci) => (
-                  <div key={ci} className="flex items-center gap-1.5 text-[10px] py-[1px]">
+                {sorted.slice(0, 5).map((col) => (
+                  <div key={col.name} className="flex items-center gap-1.5 text-[10px] py-[1px]">
                     {col.isPrimaryKey ? (
                       <Key className="w-2.5 h-2.5 text-amber-500 flex-shrink-0" />
                     ) : (
@@ -211,7 +227,8 @@ function SchemaOverview({
         {/* Add table button */}
         <button
           onClick={handleAddTable}
-          className="rounded-lg border-2 border-dashed border-border bg-card/50 shadow-sm overflow-hidden text-left hover:border-primary/50 hover:shadow-md transition-all flex flex-col items-center justify-center gap-2 py-8 min-h-[100px]"
+          disabled={updateMutation.isPending}
+          className="rounded-lg border-2 border-dashed border-border bg-card/50 shadow-sm overflow-hidden text-left hover:border-primary/50 hover:shadow-md transition-all flex flex-col items-center justify-center gap-2 py-8 min-h-[100px] disabled:opacity-50"
         >
           <Plus className="w-5 h-5 text-muted-foreground/50" />
           <span className="text-xs text-muted-foreground/50">Add Table</span>
@@ -258,6 +275,9 @@ function TableDetail({
   const [isEditingTableName, setIsEditingTableName] = useState(false);
   const [editTableName, setEditTableName] = useState(table.name);
 
+  // Sync edit state when table.name changes externally
+  useEffect(() => { setEditTableName(table.name); }, [table.name]);
+
   const handleSaveTableName = useCallback(() => {
     const trimmed = editTableName.trim();
     if (!trimmed || trimmed === table.name) {
@@ -265,9 +285,20 @@ function TableDetail({
       setEditTableName(table.name);
       return;
     }
-    const updatedTables = allTables.map((t) =>
-      t.name === table.name ? { ...t, name: trimmed } : t
-    );
+    // Update the table name AND fix FK references in other tables
+    const updatedTables = allTables.map((t) => {
+      if (t.name === table.name) return { ...t, name: trimmed };
+      // Update relationship references pointing to the old name
+      if (t.relationships?.some((r) => r.toTable === table.name)) {
+        return {
+          ...t,
+          relationships: t.relationships.map((r) =>
+            r.toTable === table.name ? { ...r, toTable: trimmed } : r
+          ),
+        };
+      }
+      return t;
+    });
     updateMutation.mutate(
       { id: schema.id, data: { tables: updatedTables } },
       {
@@ -282,8 +313,9 @@ function TableDetail({
   }, [editTableName, table.name, allTables, schema.id, updateMutation, toast, onNavigate]);
 
   const handleAddColumn = useCallback(() => {
+    const colName = uniqueName("new_field_", table.columns.map((c) => c.name));
     const newCol: ParsedColumn = {
-      name: `new_field_${table.columns.length + 1}`,
+      name: colName,
       type: "VARCHAR(255)",
       isPrimaryKey: false,
     };
@@ -299,13 +331,6 @@ function TableDetail({
     );
   }, [table, allTables, schema.id, updateMutation, toast]);
 
-  const formatTimestamp = (ts?: Date | string) => {
-    if (!ts) return null;
-    const d = typeof ts === "string" ? new Date(ts) : ts;
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) +
-      " " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  };
-
   return (
     <div className="p-6 space-y-6">
       {/* Breadcrumb header */}
@@ -314,6 +339,7 @@ function TableDetail({
           variant="ghost"
           size="sm"
           className="h-7 w-7 p-0"
+          aria-label="Back to schema overview"
           onClick={() => onNavigate?.({ schemaId: schema.id })}
         >
           <ChevronLeft className="w-4 h-4" />
@@ -336,12 +362,13 @@ function TableDetail({
                 if (e.key === "Escape") { setIsEditingTableName(false); setEditTableName(table.name); }
               }}
               className="h-7 text-sm font-semibold font-mono max-w-[200px]"
+              aria-label="Table name"
               autoFocus
             />
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSaveTableName}>
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" aria-label="Save name" onClick={handleSaveTableName} disabled={updateMutation.isPending}>
               <Check className="w-3.5 h-3.5 text-emerald-500" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => { setIsEditingTableName(false); setEditTableName(table.name); }}>
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" aria-label="Cancel editing" onClick={() => { setIsEditingTableName(false); setEditTableName(table.name); }}>
               <X className="w-3.5 h-3.5 text-muted-foreground" />
             </Button>
           </div>
@@ -355,6 +382,7 @@ function TableDetail({
             </h2>
             <button
               onClick={() => setIsEditingTableName(true)}
+              aria-label="Rename table"
               className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-accent/50 transition-all"
             >
               <Pencil className="w-3 h-3 text-muted-foreground" />
@@ -385,10 +413,11 @@ function TableDetail({
             const isFK = outgoing.some((r) => r.fromCol.toLowerCase() === col.name.toLowerCase());
             return (
               <div
-                key={ci}
+                key={col.name}
                 role="button"
                 tabIndex={0}
                 onClick={() => onNavigate?.({ schemaId: schema.id, tableName: table.name, columnName: col.name })}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onNavigate?.({ schemaId: schema.id, tableName: table.name, columnName: col.name }); } }}
                 className="flex items-center gap-3 px-3 py-2 pr-10 hover:bg-accent/30 transition-colors cursor-pointer"
               >
                 {col.isPrimaryKey ? (
@@ -421,7 +450,8 @@ function TableDetail({
         {/* Add field button */}
         <button
           onClick={handleAddColumn}
-          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent/20 transition-colors border-t border-border/50"
+          disabled={updateMutation.isPending}
+          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent/20 transition-colors border-t border-border/50 disabled:opacity-50"
         >
           <Plus className="w-3 h-3" />
           Add Field
@@ -486,6 +516,7 @@ function ColumnDetail({
           variant="ghost"
           size="sm"
           className="h-7 w-7 p-0"
+          aria-label="Back to table detail"
           onClick={() => onNavigate?.({ schemaId: schema.id, tableName: table.name })}
         >
           <ChevronLeft className="w-4 h-4" />

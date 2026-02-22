@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas, useSchemaVoiceContexts, useUpsertSchemaVoiceContext, useDemoBootstrap, type DemoBootstrapResult } from "@/hooks/use-sql-queries";
-import type { SqlQuery } from "@shared/schema";
+import type { SqlQuery, SchemaVoiceContext } from "@shared/schema";
 import { QueryDocumentList } from "@/components/QueryDocumentList";
 import { SqlEditor } from "@/components/SqlEditor";
 import { FeedbackPanel } from "@/components/FeedbackPanel";
@@ -22,6 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Play, Sparkles, AlertCircle, Mic, Key, Columns3 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
 import { useCurrentUser } from "@/hooks/use-admin";
@@ -61,15 +62,11 @@ const TAB_ICON: Record<WorkspaceTabType, React.ElementType> = {
 // Schema Context Panel — right sidebar for schemas tab
 // ---------------------------------------------------------------------------
 
-import { normalizeTables as normalizeTablesEditor } from "@/components/SchemaModule";
-import { useToast as useEditorToast } from "@/hooks/use-toast";
-import type { SchemaVoiceContext } from "@shared/schema";
-
 function SchemaContextPanel({ selection }: { selection: SchemaSelection | null }) {
   const { data: schemas } = useUserSchemas();
   const { data: voiceContexts } = useSchemaVoiceContexts(selection?.schemaId ?? null);
   const upsertMutation = useUpsertSchemaVoiceContext();
-  const { toast } = useEditorToast();
+  const { toast } = useToast();
   const [editTranscript, setEditTranscript] = useState("");
   const [editTarget, setEditTarget] = useState<{
     type: "schema" | "table" | "column";
@@ -83,7 +80,7 @@ function SchemaContextPanel({ selection }: { selection: SchemaSelection | null }
     const schema = schemas.find((s) => s.id === selection.schemaId);
     if (!schema) return null;
 
-    const tables = normalizeTablesEditor(schema.tables);
+    const tables = normalizeTables(schema.tables);
 
     if (selection.columnName && selection.tableName) {
       const table = tables.find((t) => t.name === selection.tableName);
@@ -215,6 +212,7 @@ function SchemaContextPanel({ selection }: { selection: SchemaSelection | null }
           value={editTranscript}
           onChange={(e) => setEditTranscript(e.target.value)}
           placeholder={`Add context about this ${contextInfo.level}... e.g., business meaning, typical values, relationships, constraints`}
+          aria-label={`Context for ${contextInfo.label}`}
           className="text-xs flex-1 min-h-[100px] resize-none"
         />
 
