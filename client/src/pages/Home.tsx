@@ -72,14 +72,28 @@ function DataPolicyModal({ open, onClose }: { open: boolean; onClose: () => void
               </h3>
               <p>
                 QueryFlow sends your SQL queries, schema definitions, and associated context to
-                OpenAI's API for analysis, formatting, and query generation. This means your SQL
-                content is transmitted to and processed by OpenAI's servers. By using QueryFlow's
-                AI features, you acknowledge and consent to this data transmission.
+                OpenAI's <strong>API / Developer Platform</strong> for analysis, formatting, and
+                query generation. This is <strong>not</strong> the consumer ChatGPT product. By
+                using QueryFlow's AI features, you acknowledge and consent to this data
+                transmission.
               </p>
               <p className="mt-1.5">
-                OpenAI's data usage policy applies to content sent through their API. We recommend
-                reviewing <a href="https://openai.com/policies/api-data-usage-policies" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">OpenAI's API data usage policies</a> to
-                understand how they handle data received via their API.
+                Under OpenAI's API data usage policy, data submitted through the API / Developer
+                Platform is <strong>not used to train OpenAI models</strong> by default.
+                OpenAI may retain API inputs and outputs for up to 30 days solely for abuse and
+                misuse monitoring, after which it is deleted.
+              </p>
+              <p className="mt-1.5 text-xs">
+                For full details, see{" "}
+                <a href="https://openai.com/policies/api-data-usage-policies" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  OpenAI's API Data Usage Policies
+                </a>,{" "}
+                <a href="https://openai.com/policies/terms-of-use" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  OpenAI's Terms of Use
+                </a>, and{" "}
+                <a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  OpenAI's Privacy Policy
+                </a>.
               </p>
             </div>
 
@@ -99,8 +113,12 @@ function DataPolicyModal({ open, onClose }: { open: boolean; onClose: () => void
               <p>
                 Your queries and schemas are stored only in your QueryFlow account database.
                 You can delete any query, schema, or context at any time. Deletion is permanent
-                and immediate from our database. Data previously sent to OpenAI for processing
-                is subject to OpenAI's retention policies.
+                and immediate from our database.
+              </p>
+              <p className="mt-1.5">
+                Data sent to OpenAI via the API / Developer Platform is retained by OpenAI for
+                up to 30 days solely for abuse monitoring, then deleted. It is <strong>not used
+                for model training</strong>.
               </p>
             </div>
           </div>
