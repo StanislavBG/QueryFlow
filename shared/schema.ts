@@ -165,6 +165,20 @@ export const insertSchemaVoiceContextSchema = createInsertSchema(schemaVoiceCont
 export type SchemaVoiceContext = typeof schemaVoiceContext.$inferSelect;
 export type InsertSchemaVoiceContext = z.infer<typeof insertSchemaVoiceContextSchema>;
 
+// Demo Versions table (pre-generated demo content for fast, cost-effective demo bootstrap)
+export const demoVersions = pgTable("demo_versions", {
+  id: serial("id").primaryKey(),
+  schemaName: varchar("schema_name", { length: 255 }).notNull(),
+  schemaDdl: text("schema_ddl").notNull(),
+  schemaTables: jsonb("schema_tables").$type<ParsedTable[]>().default([]),
+  queryTitle: varchar("query_title", { length: 255 }).notNull(),
+  queryContent: text("query_content").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type DemoVersion = typeof demoVersions.$inferSelect;
+export type InsertDemoVersion = typeof demoVersions.$inferInsert;
+
 // Chat Messages table (persistent conversations)
 export const chatMessages = pgTable("chat_messages", {
   id: serial("id").primaryKey(),

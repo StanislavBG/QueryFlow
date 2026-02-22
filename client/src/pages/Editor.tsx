@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas, useDemoBootstrap } from "@/hooks/use-sql-queries";
+import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas, useDemoBootstrap, type DemoBootstrapResult } from "@/hooks/use-sql-queries";
+import type { SqlQuery } from "@shared/schema";
 import { QueryDocumentList } from "@/components/QueryDocumentList";
 import { SqlEditor } from "@/components/SqlEditor";
 import { FeedbackPanel } from "@/components/FeedbackPanel";
@@ -87,6 +88,25 @@ function useTheme() {
 }
 
 // ---------------------------------------------------------------------------
+// Demo constants
+// ---------------------------------------------------------------------------
+
+const DEMO_QUERY_ID = -1;
+
+function makeDemoQuery(result: DemoBootstrapResult): SqlQuery {
+  return {
+    id: DEMO_QUERY_ID,
+    userId: null,
+    title: result.query.title,
+    content: result.query.content,
+    draftContent: null,
+    formattedContent: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Editor page
 // ---------------------------------------------------------------------------
 
@@ -114,22 +134,22 @@ export default function Editor() {
   const { isSignedIn } = useAuth();
   const demoMutation = useDemoBootstrap();
   const [autoAnalyze, setAutoAnalyze] = useState(false);
-  const [isDemoQuery, setIsDemoQuery] = useState(false);
+  const [demoQuery, setDemoQuery] = useState<SqlQuery | null>(null);
+  const isDemoActive = demoQuery !== null;
 
   // When user signs in, drop any demo query/schema from local state
   const prevSignedIn = useRef(isSignedIn);
   useEffect(() => {
     if (isSignedIn && !prevSignedIn.current) {
       // User just signed in — clear demo state
-      if (isDemoQuery) {
-        setSelectedQueryId(null);
+      if (isDemoActive) {
+        setDemoQuery(null);
         setCurrentContent("");
-        setIsDemoQuery(false);
         setAutoAnalyze(false);
       }
     }
     prevSignedIn.current = isSignedIn;
-  }, [isSignedIn, isDemoQuery]);
+  }, [isSignedIn, isDemoActive]);
 
   // Schema drill-down selection state (for schemas tab)
   const [schemaSelection, setSchemaSelection] = useState<SchemaSelection | null>(null);
@@ -193,7 +213,9 @@ export default function Editor() {
   const handleQuerySelect = useCallback((id: number | null) => {
     setSelectedQueryId(id);
     setCurrentContent("");
-  }, []);
+    // Selecting a real query clears demo mode
+    if (demoQuery) setDemoQuery(null);
+  }, [demoQuery]);
 
   const handleEditorLineHover = useCallback((lineNumber: number | null) => {
     setHoveredEditorLine(lineNumber);
@@ -220,19 +242,24 @@ export default function Editor() {
   const handleDemoBootstrap = useCallback(() => {
     demoMutation.mutate(undefined, {
       onSuccess: (result) => {
-        setSelectedQueryId(result.queryId);
-        setCurrentContent(result.query.content);
-        setIsDemoQuery(true);
-        // Delay auto-analyze slightly to let react-query settle
+        const virtualQuery = makeDemoQuery(result);
+        setDemoQuery(virtualQuery);
+        setSelectedQueryId(null); // no real DB query selected
+        setCurrentContent(virtualQuery.content);
+        // Delay auto-analyze slightly to let state settle
         setTimeout(() => setAutoAnalyze(true), 500);
       },
     });
   }, [demoMutation]);
 
+  // Effective query: demo takes priority, then DB-selected query
+  const effectiveQuery = isDemoActive ? demoQuery : selectedQuery;
+  const effectiveQueryId = isDemoActive ? DEMO_QUERY_ID : selectedQueryId;
+
   // Resolve the best available query content – prefer the live editor text,
   // but fall back to the persisted draft or saved content so the Visual tab
   // (and other consumers) always have something even while a query is loading.
-  const resolvedQueryContent = currentContent || selectedQuery?.draftContent || selectedQuery?.content || "";
+  const resolvedQueryContent = currentContent || effectiveQuery?.draftContent || effectiveQuery?.content || "";
 
   // Prepare schema data for VisualExplorer (needs column names as strings)
   const schemaData = useMemo(() => {
@@ -355,7 +382,7 @@ export default function Editor() {
             <TooltipTrigger asChild>
               <span>
                 <ContextPlanDialog
-                  queryId={selectedQueryId}
+                  queryId={effectiveQueryId}
                   dialect={detectedDialect}
                   queryContent={resolvedQueryContent}
                 />
@@ -546,13 +573,13 @@ export default function Editor() {
               <div className="flex-1 overflow-hidden">
                 {activeTab.type === "query" && (
                   <>
-                    {(queriesLoading || queryLoading) ? (
+                    {(queriesLoading || queryLoading) && !isDemoActive ? (
                       <div className="flex items-center justify-center h-full">
                         <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
                       </div>
-                    ) : selectedQuery ? (
+                    ) : effectiveQuery ? (
                       <SqlEditor
-                        query={selectedQuery}
+                        query={effectiveQuery}
                         onContentChange={handleContentChange}
                         maxChars={MODEL.maxQueryChars}
                         modelName={MODEL.name}
@@ -634,7 +661,7 @@ export default function Editor() {
             <div className="h-full border-l border-border bg-card">
               {activeTab.type === "query" && (
                 <FeedbackPanel
-                  queryId={selectedQueryId}
+                  queryId={effectiveQueryId}
                   dialect={detectedDialect}
                   queryContent={resolvedQueryContent}
                   hoveredLine={hoveredEditorLine}
