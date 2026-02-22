@@ -7,6 +7,8 @@ import { z } from "zod";
 import { formatSQL } from "./formatter";
 import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, llmGenerateQueryFromVoice, llmAnalyzeWaterfall, logLlmError, getLlmErrors, clearLlmErrors } from "./llm";
 import { requireAdmin, resolveAppUser, logActivity } from "./auth";
+import { mergeWaterfallAnalysis } from "./waterfall-merge";
+import type { WaterfallAnalysis } from "@shared/waterfall";
 
 // All available analysis categories
 const ALL_CATEGORIES = ["structure", "optimization", "error", "style", "formatting", "documentation"] as const;
@@ -568,12 +570,38 @@ export async function registerRoutes(
         console.warn("[waterfall] Could not load schema context:", schemaErr);
       }
 
-      const result = await llmAnalyzeWaterfall(input.content, {
+      const llmResult = await llmAnalyzeWaterfall(input.content, {
         dialect: input.dialect,
         schemas: schemaContext,
       });
 
-      res.json(result);
+      // If a queryId was provided, try to merge with existing user-evolved data
+      if (input.queryId) {
+        const query = await storage.getSqlQuery(input.queryId);
+        if (query?.waterfallData) {
+          const mergeResult = mergeWaterfallAnalysis(
+            query.waterfallData as WaterfallAnalysis,
+            llmResult
+          );
+          // Auto-save the merged result back
+          await storage.updateSqlQuery(input.queryId, {
+            waterfallData: mergeResult.analysis,
+          } as any);
+          return res.json(mergeResult);
+        }
+        // No existing data — save the fresh result
+        await storage.updateSqlQuery(input.queryId, {
+          waterfallData: llmResult,
+        } as any);
+      }
+
+      // Return as a WaterfallMergeResult with empty conflicts
+      res.json({
+        analysis: llmResult,
+        conflicts: [],
+        newNodes: [],
+        removedNodes: [],
+      });
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({
@@ -583,12 +611,59 @@ export async function registerRoutes(
       }
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[waterfall] Analysis failed:", errMsg);
-      // logLlmError is already called inside llmAnalyzeWaterfall for parse errors;
-      // this catches any other error (network, auth, etc.)
       if (!errMsg.includes("Failed to parse waterfall") && !errMsg.includes("no valid nodes")) {
         logLlmError("waterfall", errMsg, { inputPreview: (req.body?.content || "").slice(0, 500) });
       }
       res.status(500).json({ message: errMsg || "Waterfall analysis failed" });
+    }
+  });
+
+  // ─── Waterfall: Save user modifications ─────────────────────────────
+
+  app.put("/api/sql-queries/:id/waterfall", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const input = api.waterfall.save.input.parse(req.body);
+      const query = await storage.getSqlQuery(id);
+      if (!query) {
+        return res.status(404).json({ message: "Query not found" });
+      }
+
+      const { userId: wfUserId } = getAuth(req);
+      logActivity(wfUserId, "waterfall.save", "waterfall", id);
+
+      await storage.updateSqlQuery(id, {
+        waterfallData: input as WaterfallAnalysis,
+      } as any);
+
+      res.json(input);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          message: err.errors[0].message,
+          field: err.errors[0].path.join('.'),
+        });
+      }
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[waterfall] Save failed:", errMsg);
+      res.status(500).json({ message: errMsg || "Failed to save waterfall data" });
+    }
+  });
+
+  // ─── Waterfall: Get stored data ─────────────────────────────────────
+
+  app.get("/api/sql-queries/:id/waterfall", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const query = await storage.getSqlQuery(id);
+      if (!query) {
+        return res.status(404).json({ message: "Query not found" });
+      }
+      res.json(query.waterfallData ?? null);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[waterfall] Get failed:", errMsg);
+      res.status(500).json({ message: errMsg || "Failed to get waterfall data" });
     }
   });
 

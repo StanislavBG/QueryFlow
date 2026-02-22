@@ -280,21 +280,59 @@ export function useFormatQuery() {
 
 export function useWaterfallAnalysis() {
   return useMutation<
-    import("@shared/waterfall").WaterfallAnalysis,
+    import("@shared/waterfall").WaterfallMergeResult,
     Error,
-    { content: string; dialect?: string }
+    { content: string; dialect?: string; queryId?: number }
   >({
-    mutationFn: async ({ content, dialect }) => {
+    mutationFn: async ({ content, dialect, queryId }) => {
       const res = await fetch(api.waterfall.analyze.path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, dialect }),
+        body: JSON.stringify({ content, dialect, queryId }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ message: "Waterfall analysis failed" }));
         throw new Error(err.message);
       }
       return res.json();
+    },
+  });
+}
+
+export function useWaterfallData(queryId: number | null | undefined) {
+  return useQuery<import("@shared/waterfall").WaterfallAnalysis | null>({
+    queryKey: ["waterfall-data", queryId],
+    queryFn: async () => {
+      if (!queryId) return null;
+      const res = await fetch(buildUrl(api.waterfall.get.path, { id: queryId }));
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!queryId,
+  });
+}
+
+export function useSaveWaterfallData() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    import("@shared/waterfall").WaterfallAnalysis,
+    Error,
+    { queryId: number; analysis: import("@shared/waterfall").WaterfallAnalysis }
+  >({
+    mutationFn: async ({ queryId, analysis }) => {
+      const res = await fetch(buildUrl(api.waterfall.save.path, { id: queryId }), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(analysis),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Failed to save waterfall data" }));
+        throw new Error(err.message);
+      }
+      return res.json();
+    },
+    onSuccess: (_data, { queryId }) => {
+      queryClient.invalidateQueries({ queryKey: ["waterfall-data", queryId] });
     },
   });
 }
