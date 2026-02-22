@@ -48,7 +48,7 @@ export interface VisualExplorerProps {
 
 const NODE_WIDTH = 220;
 const NODE_MIN_HEIGHT = 64;
-const TIER_GAP_Y = 100;
+const TIER_GAP_Y = 180;     // extra vertical space for connection lines
 const NODE_GAP_X = 40;
 const TOP_PADDING = 24;
 
@@ -366,35 +366,25 @@ function WaterfallEdgeOverlay({
               markerEnd={`url(#arrow-${edge.edgeType}${isActive ? "" : "-dim"})`}
               style={{ transition: "stroke 0.15s, stroke-width 0.15s" }}
             />
-            {/* Midpoint indicator */}
-            <circle
-              cx={(x1 + x2) / 2}
-              cy={midY}
-              r={isActive ? 5 : 3}
-              fill={isActive ? edgeStyle.hoverColor : edgeStyle.color}
-              style={{ transition: "fill 0.15s, r 0.15s" }}
-            />
-
-            {/* Inline tooltip on hover */}
-            {isActive && fromNode && toNode && (
+            {/* Midpoint edge label — always visible in the connector lane */}
+            {fromNode && toNode && (
               <foreignObject
-                x={(x1 + x2) / 2 - 120}
-                y={midY - 36}
-                width={240}
-                height={48}
+                x={(x1 + x2) / 2 - 100}
+                y={midY - 14}
+                width={200}
+                height={28}
                 className="pointer-events-none"
               >
                 <div className="flex items-center justify-center h-full">
-                  <div className="rounded-md border border-border bg-popover px-3 py-1.5 shadow-md text-xs text-popover-foreground max-w-[230px] text-center whitespace-nowrap overflow-hidden">
-                    <span
-                      className="font-semibold px-1.5 py-0.5 rounded text-[10px]"
-                      style={{ color: edgeStyle.hoverColor }}
-                    >
-                      {edgeStyle.label}
-                    </span>
-                    <span className="text-muted-foreground mx-1 text-[10px]">
-                      {fromNode.name} → {toNode.name}
-                    </span>
+                  <div
+                    className={`rounded-full border px-2.5 py-0.5 text-[10px] font-medium whitespace-nowrap transition-all duration-150 ${
+                      isActive
+                        ? "bg-popover border-border shadow-md"
+                        : "bg-muted/80 border-border/50"
+                    }`}
+                    style={{ color: isActive ? edgeStyle.hoverColor : edgeStyle.color }}
+                  >
+                    {edgeStyle.label}
                   </div>
                 </div>
               </foreignObject>
