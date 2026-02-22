@@ -1,6 +1,55 @@
 import OpenAI from "openai";
 import type { WaterfallAnalysis, WaterfallNode, WaterfallEdge } from "@shared/waterfall";
 
+// ---------------------------------------------------------------------------
+// In-memory LLM error log (ring buffer, last 50 entries)
+// ---------------------------------------------------------------------------
+
+export interface LlmErrorEntry {
+  id: number;
+  timestamp: string;
+  source: string;       // e.g. "waterfall", "analyze", "format", "parseSchema"
+  message: string;
+  rawResponse?: string; // first 4000 chars of the raw LLM output (if available)
+  inputPreview?: string; // first 500 chars of the input that caused the error
+}
+
+const MAX_ERROR_LOG = 50;
+let _errorSeq = 0;
+const _errorLog: LlmErrorEntry[] = [];
+
+export function logLlmError(
+  source: string,
+  message: string,
+  opts?: { rawResponse?: string; inputPreview?: string }
+): void {
+  _errorSeq++;
+  const entry: LlmErrorEntry = {
+    id: _errorSeq,
+    timestamp: new Date().toISOString(),
+    source,
+    message,
+    rawResponse: opts?.rawResponse?.slice(0, 4000),
+    inputPreview: opts?.inputPreview?.slice(0, 500),
+  };
+  _errorLog.push(entry);
+  if (_errorLog.length > MAX_ERROR_LOG) _errorLog.shift();
+  console.error(`[llm-error][${source}] ${message}`);
+  if (opts?.rawResponse) {
+    console.error(`[llm-error][${source}] Raw response (first 500):`, opts.rawResponse.slice(0, 500));
+  }
+}
+
+export function getLlmErrors(): LlmErrorEntry[] {
+  return [..._errorLog];
+}
+
+export function clearLlmErrors(): void {
+  _errorLog.length = 0;
+}
+
+// ---------------------------------------------------------------------------
+
 let client: OpenAI | null = null;
 
 /** Default model for Replit AI integrations (OpenAI-compatible proxy). */
@@ -904,7 +953,10 @@ Return ONLY JSON:
   const raw = extractJsonObject(text);
 
   if (!raw || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) {
-    console.error("[waterfall] LLM returned invalid structure:", text.slice(0, 500));
+    logLlmError("waterfall", "Failed to parse waterfall analysis — LLM did not return valid {nodes,edges} JSON", {
+      rawResponse: text,
+      inputPreview: sql,
+    });
     throw new Error("Failed to parse waterfall analysis from LLM response");
   }
 
@@ -957,6 +1009,10 @@ Return ONLY JSON:
     }));
 
   if (nodes.length === 0) {
+    logLlmError("waterfall", "Waterfall analysis produced no valid nodes after validation", {
+      rawResponse: text,
+      inputPreview: sql,
+    });
     throw new Error("Waterfall analysis produced no valid nodes");
   }
 

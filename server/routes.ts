@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
 import { formatSQL } from "./formatter";
-import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, llmGenerateQueryFromVoice, llmAnalyzeWaterfall } from "./llm";
+import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, llmGenerateQueryFromVoice, llmAnalyzeWaterfall, logLlmError, getLlmErrors, clearLlmErrors } from "./llm";
 import { requireAdmin, resolveAppUser, logActivity } from "./auth";
 
 // All available analysis categories
@@ -333,8 +333,10 @@ export async function registerRoutes(
         sendEvent({ done: true, results: created });
       }
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       console.error("LLM analysis failed:", err);
-      sendEvent({ error: true, message: "Analysis failed. Please try again." });
+      logLlmError("analyze", errMsg, { inputPreview: sqlContent?.slice(0, 500) });
+      sendEvent({ error: true, message: `Analysis failed: ${errMsg}` });
     } finally {
       res.end();
     }
@@ -563,11 +565,25 @@ export async function registerRoutes(
         });
       }
       const errMsg = err instanceof Error ? err.message : String(err);
-      const errStack = err instanceof Error ? err.stack : undefined;
       console.error("[waterfall] Analysis failed:", errMsg);
-      if (errStack) console.error("[waterfall] Stack:", errStack);
+      // logLlmError is already called inside llmAnalyzeWaterfall for parse errors;
+      // this catches any other error (network, auth, etc.)
+      if (!errMsg.includes("Failed to parse waterfall") && !errMsg.includes("no valid nodes")) {
+        logLlmError("waterfall", errMsg, { inputPreview: (req.body?.content || "").slice(0, 500) });
+      }
       res.status(500).json({ message: errMsg || "Waterfall analysis failed" });
     }
+  });
+
+  // ─── LLM Error Log ──────────────────────────────────────────────────
+
+  app.get("/api/llm-errors", (_req, res) => {
+    res.json(getLlmErrors());
+  });
+
+  app.delete("/api/llm-errors", (_req, res) => {
+    clearLlmErrors();
+    res.json({ message: "Cleared" });
   });
 
   // ─── Agent Settings Routes ─────────────────────────────────────────
