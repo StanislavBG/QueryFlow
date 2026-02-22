@@ -3,7 +3,7 @@ import { useUpdateSqlQuery } from "@/hooks/use-sql-queries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Save, Loader2, Pencil, Check, AlertTriangle, Minus, Plus, Highlighter } from "lucide-react";
+import { Save, Loader2, Pencil, Check, AlertTriangle, Minus, Plus, Highlighter, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { SqlQuery } from "@shared/schema";
 
@@ -102,6 +102,7 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, highlig
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const updateMutation = useUpdateSqlQuery();
   const { toast } = useToast();
   const draftTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -121,8 +122,10 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, highlig
   }, [query.id, query.content, query.title, query.draftContent]);
 
   // Auto-save draft with debounce (crash-recovery copy only)
+  // Skip for virtual/demo queries (id <= 0)
   const debouncedDraftSave = useCallback(
     (newContent: string) => {
+      if (query.id <= 0) return;
       if (draftTimeoutRef.current) {
         clearTimeout(draftTimeoutRef.current);
       }
@@ -183,7 +186,9 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, highlig
   };
 
   // Manual Save: persists content + title, clears draft
+  // Skip for virtual/demo queries (id <= 0)
   const handleSave = () => {
+    if (query.id <= 0) return;
     if (draftTimeoutRef.current) {
       clearTimeout(draftTimeoutRef.current);
     }
@@ -205,8 +210,45 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, highlig
 
   const handleTitleSave = () => {
     setIsEditingTitle(false);
-    updateMutation.mutate({ id: query.id, data: { title } });
+    if (query.id > 0) {
+      updateMutation.mutate({ id: query.id, data: { title } });
+    }
   };
+
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      let text = ev.target?.result as string;
+      if (text.length > maxChars) {
+        text = text.slice(0, maxChars);
+        toast({
+          title: "File truncated",
+          description: `File exceeded ${formatCharCount(maxChars)} character limit and was truncated.`,
+          variant: "destructive",
+        });
+      }
+      setContent(text);
+      onContentChange(text);
+      debouncedDraftSave(text);
+      // Use filename (without extension) as title
+      const name = file.name.replace(/\.[^.]+$/, "");
+      if (name) {
+        setTitle(name);
+        if (query.id > 0) {
+          updateMutation.mutate({ id: query.id, data: { title: name } });
+        }
+      }
+      toast({ title: "File loaded", description: `Loaded ${file.name}` });
+    };
+    reader.onerror = () => {
+      toast({ title: "Error", description: "Failed to read file.", variant: "destructive" });
+    };
+    reader.readAsText(file);
+    // Reset input so the same file can be re-uploaded
+    e.target.value = "";
+  }, [maxChars, onContentChange, debouncedDraftSave, query.id, updateMutation, toast]);
 
   const lineHeight = Math.round(fontSize * 1.857);
 
@@ -380,6 +422,24 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, highlig
               <p className="text-xs">{hasDraft ? "Save query (unsaved changes)" : "Save query"}</p>
             </TooltipContent>
           </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Upload className="w-3.5 h-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom"><p className="text-xs">Upload query from file</p></TooltipContent>
+          </Tooltip>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".sql,.txt,.hql,.ddl,.dml,.pgsql,.plsql,.mysql"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
           <div className="w-px h-3.5 bg-border mx-0.5" />
           <Tooltip>
             <TooltipTrigger asChild>

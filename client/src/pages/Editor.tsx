@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas, useDemoBootstrap } from "@/hooks/use-sql-queries";
+import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas, useDemoBootstrap, type DemoBootstrapResult } from "@/hooks/use-sql-queries";
+import type { SqlQuery } from "@shared/schema";
 import { QueryDocumentList } from "@/components/QueryDocumentList";
 import { SqlEditor } from "@/components/SqlEditor";
 import { FeedbackPanel } from "@/components/FeedbackPanel";
@@ -17,8 +18,9 @@ import {
 } from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Play } from "lucide-react";
+import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Play, Sparkles, Zap, AlertCircle, AlertTriangle, Info, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
 import { useCurrentUser } from "@/hooks/use-admin";
@@ -87,6 +89,25 @@ function useTheme() {
 }
 
 // ---------------------------------------------------------------------------
+// Demo constants
+// ---------------------------------------------------------------------------
+
+const DEMO_QUERY_ID = -1;
+
+function makeDemoQuery(result: DemoBootstrapResult): SqlQuery {
+  return {
+    id: DEMO_QUERY_ID,
+    userId: null,
+    title: result.query.title,
+    content: result.query.content,
+    draftContent: null,
+    formattedContent: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Editor page
 // ---------------------------------------------------------------------------
 
@@ -114,22 +135,23 @@ export default function Editor() {
   const { isSignedIn } = useAuth();
   const demoMutation = useDemoBootstrap();
   const [autoAnalyze, setAutoAnalyze] = useState(false);
-  const [isDemoQuery, setIsDemoQuery] = useState(false);
+  const [demoQuery, setDemoQuery] = useState<SqlQuery | null>(null);
+  const isDemoActive = demoQuery !== null;
+  const showOnboarding = !isSignedIn && !isDemoActive;
 
   // When user signs in, drop any demo query/schema from local state
   const prevSignedIn = useRef(isSignedIn);
   useEffect(() => {
     if (isSignedIn && !prevSignedIn.current) {
       // User just signed in — clear demo state
-      if (isDemoQuery) {
-        setSelectedQueryId(null);
+      if (isDemoActive) {
+        setDemoQuery(null);
         setCurrentContent("");
-        setIsDemoQuery(false);
         setAutoAnalyze(false);
       }
     }
     prevSignedIn.current = isSignedIn;
-  }, [isSignedIn, isDemoQuery]);
+  }, [isSignedIn, isDemoActive]);
 
   // Schema drill-down selection state (for schemas tab)
   const [schemaSelection, setSchemaSelection] = useState<SchemaSelection | null>(null);
@@ -193,7 +215,9 @@ export default function Editor() {
   const handleQuerySelect = useCallback((id: number | null) => {
     setSelectedQueryId(id);
     setCurrentContent("");
-  }, []);
+    // Selecting a real query clears demo mode
+    if (demoQuery) setDemoQuery(null);
+  }, [demoQuery]);
 
   const handleEditorLineHover = useCallback((lineNumber: number | null) => {
     setHoveredEditorLine(lineNumber);
@@ -220,19 +244,24 @@ export default function Editor() {
   const handleDemoBootstrap = useCallback(() => {
     demoMutation.mutate(undefined, {
       onSuccess: (result) => {
-        setSelectedQueryId(result.queryId);
-        setCurrentContent(result.query.content);
-        setIsDemoQuery(true);
-        // Delay auto-analyze slightly to let react-query settle
+        const virtualQuery = makeDemoQuery(result);
+        setDemoQuery(virtualQuery);
+        setSelectedQueryId(null); // no real DB query selected
+        setCurrentContent(virtualQuery.content);
+        // Delay auto-analyze slightly to let state settle
         setTimeout(() => setAutoAnalyze(true), 500);
       },
     });
   }, [demoMutation]);
 
+  // Effective query: demo takes priority, then DB-selected query
+  const effectiveQuery = isDemoActive ? demoQuery : selectedQuery;
+  const effectiveQueryId = isDemoActive ? DEMO_QUERY_ID : selectedQueryId;
+
   // Resolve the best available query content – prefer the live editor text,
   // but fall back to the persisted draft or saved content so the Visual tab
   // (and other consumers) always have something even while a query is loading.
-  const resolvedQueryContent = currentContent || selectedQuery?.draftContent || selectedQuery?.content || "";
+  const resolvedQueryContent = currentContent || effectiveQuery?.draftContent || effectiveQuery?.content || "";
 
   // Prepare schema data for VisualExplorer (needs column names as strings)
   const schemaData = useMemo(() => {
@@ -355,7 +384,7 @@ export default function Editor() {
             <TooltipTrigger asChild>
               <span>
                 <ContextPlanDialog
-                  queryId={selectedQueryId}
+                  queryId={effectiveQueryId}
                   dialect={detectedDialect}
                   queryContent={resolvedQueryContent}
                 />
@@ -417,29 +446,79 @@ export default function Editor() {
 
               {/* Tab content */}
               <div className="flex-1 overflow-hidden">
-                {leftTab === "queries" && (
-                  <QueryDocumentList
-                    selectedId={selectedQueryId}
-                    onSelect={handleQuerySelect}
-                  />
-                )}
-                {leftTab === "ask" && (
-                  <AskModule
-                    queryContent={resolvedQueryContent}
-                    dialect={detectedDialect}
-                  />
-                )}
-                {leftTab === "schemas" && (
-                  <SchemaTreePanel
-                    selection={schemaSelection}
-                    onSelect={setSchemaSelection}
-                  />
-                )}
-                {leftTab === "visual" && (
-                  <VisualExplorer
-                    queryContent={resolvedQueryContent}
-                    schemas={schemaData}
-                  />
+                {showOnboarding ? (
+                  /* ── Onboarding: feature overview ── */
+                  <div className="h-full overflow-auto p-4 space-y-5">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <FileCode2 className="w-5 h-5 text-primary" />
+                        <h2 className="text-base font-bold text-gradient">QueryFlow</h2>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        AI-powered SQL analysis that catches what code review misses.
+                      </p>
+                    </div>
+
+                    <div className="h-px bg-border" />
+
+                    <div className="space-y-3">
+                      {([
+                        { icon: Sparkles, title: "AI Analysis", desc: "Multi-agent analysis catches bugs, performance issues, and security risks across 10+ categories.", color: "text-primary" },
+                        { icon: Table2, title: "Schema-Aware", desc: "Upload DDL schemas for context-aware validation of joins, column references, and types.", color: "text-cyan-500" },
+                        { icon: MessageSquare, title: "Ask AI", desc: "Chat with AI about your SQL queries. Get explanations, alternatives, and best practices.", color: "text-violet-500" },
+                        { icon: Boxes, title: "Visual Explorer", desc: "See query relationships and data flow as an interactive visual graph.", color: "text-emerald-500" },
+                        { icon: Zap, title: "Smart Format", desc: "One-click LLM-powered formatting to ISO/IEC 9075 standards.", color: "text-amber-500" },
+                      ] as const).map((feat) => {
+                        const Icon = feat.icon;
+                        return (
+                          <div key={feat.title} className="flex items-start gap-2.5">
+                            <div className="mt-0.5 p-1.5 rounded-md bg-accent/50">
+                              <Icon className={`w-3.5 h-3.5 ${feat.color}`} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-semibold text-foreground">{feat.title}</p>
+                              <p className="text-[10px] text-muted-foreground leading-relaxed">{feat.desc}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="h-px bg-border" />
+
+                    <div className="text-center space-y-2">
+                      <p className="text-[10px] text-muted-foreground">Try the interactive demo to see it in action</p>
+                      <ArrowRight className="w-3.5 h-3.5 text-muted-foreground mx-auto animate-pulse" />
+                    </div>
+                  </div>
+                ) : (
+                  /* ── Normal tab content ── */
+                  <>
+                    {leftTab === "queries" && (
+                      <QueryDocumentList
+                        selectedId={selectedQueryId}
+                        onSelect={handleQuerySelect}
+                      />
+                    )}
+                    {leftTab === "ask" && (
+                      <AskModule
+                        queryContent={resolvedQueryContent}
+                        dialect={detectedDialect}
+                      />
+                    )}
+                    {leftTab === "schemas" && (
+                      <SchemaTreePanel
+                        selection={schemaSelection}
+                        onSelect={setSchemaSelection}
+                      />
+                    )}
+                    {leftTab === "visual" && (
+                      <VisualExplorer
+                        queryContent={resolvedQueryContent}
+                        schemas={schemaData}
+                      />
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -546,13 +625,13 @@ export default function Editor() {
               <div className="flex-1 overflow-hidden">
                 {activeTab.type === "query" && (
                   <>
-                    {(queriesLoading || queryLoading) ? (
+                    {(queriesLoading || queryLoading) && !isDemoActive ? (
                       <div className="flex items-center justify-center h-full">
                         <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
                       </div>
-                    ) : selectedQuery ? (
+                    ) : effectiveQuery ? (
                       <SqlEditor
-                        query={selectedQuery}
+                        query={effectiveQuery}
                         onContentChange={handleContentChange}
                         maxChars={MODEL.maxQueryChars}
                         modelName={MODEL.name}
@@ -562,43 +641,66 @@ export default function Editor() {
                         scrollToLine={scrollToLine}
                       />
                     ) : (
-                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-4">
-                        <FileCode2 className="w-10 h-10 opacity-30" />
-                        {isSignedIn ? (
+                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-4 px-6">
+                        {showOnboarding ? (
+                          /* ── Onboarding: center hero ── */
                           <>
-                            <p className="text-sm font-medium">Welcome to QueryFlow</p>
-                            <p className="text-xs opacity-60 max-w-[280px] text-center">
-                              Create your first query from the sidebar to get started. Paste any SQL and hit Analyze to get instant, actionable feedback.
+                            <div className="p-4 rounded-2xl bg-gradient-to-br from-primary/10 to-purple-600/10 border border-primary/10">
+                              <FileCode2 className="w-12 h-12 text-primary" />
+                            </div>
+
+                            <h2 className="text-xl md:text-2xl font-bold text-foreground text-center">
+                              Write SQL. Get instant AI feedback.
+                            </h2>
+
+                            <p className="text-sm text-muted-foreground max-w-md text-center leading-relaxed">
+                              See QueryFlow analyze a real-world analytics query with 9 intentional business analyst mistakes — revenue inflation, missing filters, wrong JOINs, and more.
                             </p>
-                          </>
-                        ) : (
-                          <>
-                            <p className="text-sm font-medium">No query selected</p>
-                            <p className="text-xs opacity-60 max-w-[280px] text-center">
-                              Try our interactive demo to see QueryFlow analyze a real-world SQL query with common business analyst mistakes.
-                            </p>
+
                             <Button
                               onClick={handleDemoBootstrap}
                               disabled={demoMutation.isPending}
-                              className="h-9 px-5 text-sm gap-2"
+                              className="h-11 px-8 text-sm gap-2 rounded-full shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5 transition-all duration-300 bg-gradient-to-r from-primary to-purple-600 text-primary-foreground font-semibold"
                             >
                               {demoMutation.isPending ? (
                                 <>
                                   <Loader2 className="w-4 h-4 animate-spin" />
-                                  Generating demo...
+                                  Loading demo...
                                 </>
                               ) : (
                                 <>
                                   <Play className="w-4 h-4" />
                                   Try Demo
+                                  <ArrowRight className="w-4 h-4" />
                                 </>
                               )}
                             </Button>
+
                             {demoMutation.isPending && (
-                              <p className="text-[10px] opacity-40 max-w-[240px] text-center">
-                                Generating an e-commerce schema and analytical query with common BA mistakes...
+                              <p className="text-[10px] text-muted-foreground/60 max-w-[280px] text-center">
+                                Loading a pre-generated e-commerce schema and analytical query...
                               </p>
                             )}
+
+                            {/* Decorative SQL preview */}
+                            <div className="mt-4 w-full max-w-lg rounded-lg border border-border/50 bg-card/50 p-4 font-mono text-[11px] leading-relaxed text-muted-foreground/40 select-none overflow-hidden">
+                              <p><span className="text-primary/30 font-semibold">WITH</span> monthly_revenue <span className="text-primary/30 font-semibold">AS</span> (</p>
+                              <p className="pl-4"><span className="text-primary/30 font-semibold">SELECT</span> DATE_TRUNC(<span className="text-emerald-500/30">'month'</span>, order_date),</p>
+                              <p className="pl-8">SUM(total_amount) <span className="text-primary/30 font-semibold">AS</span> revenue</p>
+                              <p className="pl-4"><span className="text-primary/30 font-semibold">FROM</span> orders</p>
+                              <p className="pl-4"><span className="text-primary/30 font-semibold">LEFT JOIN</span> order_items <span className="text-primary/30 font-semibold">ON</span> ...</p>
+                              <p>)</p>
+                              <p><span className="text-primary/30 font-semibold">SELECT</span> * <span className="text-primary/30 font-semibold">FROM</span> monthly_revenue;</p>
+                            </div>
+                          </>
+                        ) : (
+                          /* ── Authenticated empty state ── */
+                          <>
+                            <FileCode2 className="w-10 h-10 opacity-30" />
+                            <p className="text-sm font-medium">Welcome to QueryFlow</p>
+                            <p className="text-xs opacity-60 max-w-[280px] text-center">
+                              Create your first query from the sidebar to get started. Paste any SQL and hit Analyze to get instant, actionable feedback.
+                            </p>
                           </>
                         )}
                       </div>
@@ -633,23 +735,106 @@ export default function Editor() {
           <ResizablePanel defaultSize={30} minSize={20} maxSize={45}>
             <div className="h-full border-l border-border bg-card">
               {activeTab.type === "query" && (
-                <FeedbackPanel
-                  queryId={selectedQueryId}
-                  dialect={detectedDialect}
-                  queryContent={resolvedQueryContent}
-                  hoveredLine={hoveredEditorLine}
-                  activeLine={cursorLine}
-                  onFeedbackHover={handleFeedbackHover}
-                  onScrollToLine={handleScrollToLine}
-                  onApplySuggestion={(beforeSql, afterSql) => {
-                    const current = resolvedQueryContent;
-                    if (current.includes(beforeSql)) {
-                      setCurrentContent(current.replace(beforeSql, afterSql));
-                    }
-                  }}
-                  autoAnalyze={autoAnalyze}
-                  onAutoAnalyzed={() => setAutoAnalyze(false)}
-                />
+                showOnboarding ? (
+                  /* ── Onboarding: mock feedback preview ── */
+                  <div className="flex flex-col h-full">
+                    <div className="p-3 border-b border-border">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-primary" />
+                        <h3 className="text-sm font-semibold text-foreground">AI Analysis Preview</h3>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        This is what real feedback looks like
+                      </p>
+                    </div>
+
+                    <div className="flex-1 overflow-auto p-3 space-y-2.5">
+                      {/* Mock error card */}
+                      <div className="rounded-md border border-destructive/20 bg-destructive/5 p-3">
+                        <div className="flex items-start gap-2.5">
+                          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-destructive" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground leading-tight">Revenue Inflation Risk</p>
+                            <div className="flex items-center gap-1.5 mt-1 mb-1.5">
+                              <Badge variant="outline" className="text-[10px] h-4">
+                                <Zap className="w-2.5 h-2.5 mr-1 text-muted-foreground" />
+                                Performance
+                              </Badge>
+                              <span className="text-[10px] text-muted-foreground">Line 12</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                              The SUM(total_amount) doesn't subtract returns or refunds, overstating revenue by up to 15%. This is a common mistake in analytics queries...
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Mock warning card */}
+                      <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3">
+                        <div className="flex items-start gap-2.5">
+                          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground leading-tight">Missing Date Range Filter</p>
+                            <div className="flex items-center gap-1.5 mt-1 mb-1.5">
+                              <Badge variant="outline" className="text-[10px] h-4">
+                                <AlertCircle className="w-2.5 h-2.5 mr-1 text-muted-foreground" />
+                                Correctness
+                              </Badge>
+                              <span className="text-[10px] text-muted-foreground">Line 5</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                              No date boundary on a "monthly" report — this scans all historical data, increasing query cost and returning misleading aggregates...
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Mock info card */}
+                      <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+                        <div className="flex items-start gap-2.5">
+                          <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-primary" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground leading-tight">Consider Window Functions</p>
+                            <div className="flex items-center gap-1.5 mt-1 mb-1.5">
+                              <Badge variant="outline" className="text-[10px] h-4">
+                                <Sparkles className="w-2.5 h-2.5 mr-1 text-muted-foreground" />
+                                Alternative
+                              </Badge>
+                              <span className="text-[10px] text-muted-foreground">Line 28</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                              ROW_NUMBER() could replace the self-join for ranking, improving readability and reducing the query's execution plan complexity...
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-3 border-t border-border">
+                      <p className="text-[10px] text-muted-foreground text-center">
+                        These are examples — try the demo to see real analysis
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <FeedbackPanel
+                    queryId={effectiveQueryId}
+                    dialect={detectedDialect}
+                    queryContent={resolvedQueryContent}
+                    hoveredLine={hoveredEditorLine}
+                    activeLine={cursorLine}
+                    onFeedbackHover={handleFeedbackHover}
+                    onScrollToLine={handleScrollToLine}
+                    onApplySuggestion={(beforeSql, afterSql) => {
+                      const current = resolvedQueryContent;
+                      if (current.includes(beforeSql)) {
+                        setCurrentContent(current.replace(beforeSql, afterSql));
+                      }
+                    }}
+                    autoAnalyze={autoAnalyze}
+                    onAutoAnalyzed={() => setAutoAnalyze(false)}
+                  />
+                )
               )}
 
               {activeTab.type === "schemas" && (

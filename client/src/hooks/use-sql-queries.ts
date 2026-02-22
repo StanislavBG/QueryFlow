@@ -113,7 +113,8 @@ export function useQueryFeedback(queryId: number | null) {
       if (!res.ok) throw new Error("Failed to fetch feedback");
       return res.json();
     },
-    enabled: queryId !== null,
+    // Disable DB fetch for demo queries (negative IDs) — feedback is held in cache only
+    enabled: queryId !== null && queryId > 0,
   });
 }
 
@@ -172,9 +173,14 @@ export function useAnalyzeQuery() {
 
       return results;
     },
-    onSuccess: (_, { queryId }) => {
+    onSuccess: (results, { queryId }) => {
       setProgress(null);
-      queryClient.invalidateQueries({ queryKey: ["feedback", queryId] });
+      if (queryId > 0) {
+        queryClient.invalidateQueries({ queryKey: ["feedback", queryId] });
+      } else {
+        // Demo mode: seed feedback cache directly (no DB persistence)
+        queryClient.setQueryData(["feedback", queryId], results);
+      }
     },
     onError: () => {
       setProgress(null);
@@ -233,12 +239,13 @@ export function useDismissFeedback() {
 
 // ─── Demo Bootstrap ──────────────────────────────────────────────────
 
+export interface DemoBootstrapResult {
+  query: { title: string; content: string };
+  schema: { name: string; ddl: string; tables: unknown[] };
+}
+
 export function useDemoBootstrap() {
-  const queryClient = useQueryClient();
-  return useMutation<
-    { queryId: number; schemaId: number; query: SqlQuery; schema: UserSchema },
-    Error
-  >({
+  return useMutation<DemoBootstrapResult, Error>({
     mutationFn: async () => {
       const res = await fetch("/api/demo/bootstrap", { method: "POST" });
       if (!res.ok) {
@@ -247,10 +254,7 @@ export function useDemoBootstrap() {
       }
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["sql-queries"] });
-      queryClient.invalidateQueries({ queryKey: ["schemas"] });
-    },
+    // No cache invalidation needed — demo data is virtual (not stored in sql_queries/user_schemas)
   });
 }
 
