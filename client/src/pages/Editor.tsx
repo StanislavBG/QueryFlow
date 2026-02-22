@@ -312,6 +312,233 @@ function makeDemoQuery(result: DemoBootstrapResult): SqlQuery {
 }
 
 // ---------------------------------------------------------------------------
+// Terms of Service Modal
+// ---------------------------------------------------------------------------
+
+function TermsOfServiceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = dialogRef.current;
+    if (el) el.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { onClose(); return; }
+      if (e.key !== "Tab" || !el) return;
+      const focusable = el.querySelectorAll<HTMLElement>(
+        'button, a[href], [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tos-title"
+        tabIndex={-1}
+        className="bg-card border border-border rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[80vh] overflow-auto outline-none"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Scale className="w-5 h-5 text-primary" />
+            <h2 id="tos-title" className="text-lg font-bold">Terms of Service</h2>
+          </div>
+
+          <div className="space-y-3 text-sm text-muted-foreground leading-relaxed">
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">Acceptance of Terms</h3>
+              <p>
+                By accessing or using QueryFlow, you agree to be bound by these terms. If you do not
+                agree, do not use the service.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">Description of Service</h3>
+              <p>
+                QueryFlow is an AI-powered SQL query editor that provides analysis, formatting, and
+                optimization suggestions. The service uses third-party AI providers (including OpenAI)
+                to process your queries.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">User Responsibilities</h3>
+              <p>
+                You are solely responsible for the content you submit, including SQL queries and
+                schema definitions. Do not submit content containing sensitive credentials, PII,
+                or data subject to regulatory restrictions unless you have confirmed compliance with
+                your organization's policies.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">No Warranty</h3>
+              <p>
+                QueryFlow is provided "as is" without warranties of any kind. AI-generated analysis
+                and suggestions may be incorrect or incomplete. Always review and validate suggestions
+                before applying them to production systems.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">Limitation of Liability</h3>
+              <p>
+                QueryFlow and its creators shall not be liable for any damages arising from the use
+                or inability to use the service, including but not limited to data loss, security
+                breaches, or incorrect query suggestions.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="w-full mt-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+          >
+            I Understand
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Data Policy Modal
+// ---------------------------------------------------------------------------
+
+function DataPolicyModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = dialogRef.current;
+    if (el) el.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { onClose(); return; }
+      if (e.key !== "Tab" || !el) return;
+      const focusable = el.querySelectorAll<HTMLElement>(
+        'button, a[href], [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="data-policy-title"
+        tabIndex={-1}
+        className="bg-card border border-border rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[80vh] overflow-auto outline-none"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Shield className="w-5 h-5 text-primary" />
+            <h2 id="data-policy-title" className="text-lg font-bold">How We Handle Your Data</h2>
+          </div>
+
+          <div className="space-y-3 text-sm text-muted-foreground leading-relaxed">
+            <div>
+              <h3 className="text-foreground font-semibold mb-1 flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-emerald-500" />
+                Encryption at Rest
+              </h3>
+              <p>
+                All data stored in QueryFlow — including your SQL queries, schemas, voice context, and
+                analysis feedback — is encrypted at rest using AES-256 encryption via the database
+                provider's built-in encryption layer. Backups are also encrypted. Your data is never
+                stored in plaintext on disk.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1 flex items-center gap-1.5">
+                <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
+                AI Processing via OpenAI
+              </h3>
+              <p>
+                QueryFlow sends your SQL queries, schema definitions, and associated context to
+                OpenAI's API for analysis, formatting, and query generation. This means your SQL
+                content is transmitted to and processed by OpenAI's servers. By using QueryFlow's
+                AI features, you acknowledge and consent to this data transmission.
+              </p>
+              <p className="mt-1.5">
+                OpenAI's data usage policy applies to content sent through their API. We recommend
+                reviewing <a href="https://openai.com/policies/api-data-usage-policies" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">OpenAI's API data usage policies</a> to
+                understand how they handle data received via their API.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">Your Responsibility</h3>
+              <p>
+                You are responsible for determining whether your SQL queries and schema data are
+                appropriate to process through third-party AI services. Do not submit queries
+                containing sensitive credentials, personally identifiable information (PII), or
+                data subject to regulatory restrictions (HIPAA, GDPR, etc.) unless you have
+                confirmed compliance with your organization's data policies.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">Data Retention</h3>
+              <p>
+                Your queries and schemas are stored only in your QueryFlow account database.
+                You can delete any query, schema, or context at any time. Deletion is permanent
+                and immediate from our database. Data previously sent to OpenAI for processing
+                is subject to OpenAI's retention policies.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="w-full mt-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+          >
+            I Understand
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Waterfall Detail Panel — right sidebar for visual tab
 // ---------------------------------------------------------------------------
 
