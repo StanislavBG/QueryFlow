@@ -42,6 +42,7 @@ export async function ensureTables(): Promise<void> {
       -- Add columns to existing tables if missing (safe for pre-existing DBs)
       ALTER TABLE sql_queries ADD COLUMN IF NOT EXISTS user_id VARCHAR(255);
       ALTER TABLE sql_queries ADD COLUMN IF NOT EXISTS draft_content TEXT;
+      ALTER TABLE sql_queries ADD COLUMN IF NOT EXISTS waterfall_data JSONB;
 
       CREATE TABLE IF NOT EXISTS query_feedback (
         id SERIAL PRIMARY KEY,

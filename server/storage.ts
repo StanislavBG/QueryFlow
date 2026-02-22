@@ -117,6 +117,9 @@ function decryptSqlQuery(row: SqlQuery): SqlQuery {
     content: decrypt(row.content, aad) ?? "",
     draftContent: decrypt(row.draftContent, aad),
     formattedContent: decrypt(row.formattedContent, aad),
+    waterfallData: row.waterfallData
+      ? (decryptJson<SqlQuery["waterfallData"]>(row.waterfallData, aad) ?? null)
+      : null,
   };
 }
 
@@ -207,6 +210,10 @@ export class DatabaseStorage implements IStorage {
     if (query.content !== undefined) encrypted.content = encrypt(query.content, aad);
     if (query.draftContent !== undefined) encrypted.draftContent = query.draftContent === null ? null : encrypt(query.draftContent, aad);
     if (query.formattedContent !== undefined) encrypted.formattedContent = encrypt(query.formattedContent, aad);
+    if ((query as Record<string, unknown>).waterfallData !== undefined) {
+      const wf = (query as Record<string, unknown>).waterfallData;
+      encrypted.waterfallData = wf ? encryptJson(wf, aad) : null;
+    }
     if (query.userId !== undefined) encrypted.userId = query.userId;
 
     const [updated] = await db

@@ -1,4 +1,5 @@
 import { pgTable, text, serial, varchar, timestamp, integer, boolean, jsonb } from "drizzle-orm/pg-core";
+import type { WaterfallAnalysis } from "./waterfall";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -54,6 +55,7 @@ export const sqlQueries = pgTable("sql_queries", {
   content: text("content").notNull().default(""),
   draftContent: text("draft_content"),
   formattedContent: text("formatted_content"),
+  waterfallData: jsonb("waterfall_data").$type<WaterfallAnalysis>(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
