@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas, useSchemaVoiceContexts, useUpsertSchemaVoiceContext, useDemoBootstrap, type DemoBootstrapResult } from "@/hooks/use-sql-queries";
+import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas, useSchemaVoiceContexts, useUpsertSchemaVoiceContext, useDemoBootstrap, useAnalyzeQuery, type DemoBootstrapResult } from "@/hooks/use-sql-queries";
 import type { SqlQuery, SchemaVoiceContext } from "@shared/schema";
 import { QueryDocumentList } from "@/components/QueryDocumentList";
 import { SqlEditor } from "@/components/SqlEditor";
@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, Plus, X, Boxes, Shield, Play, Sparkles, AlertCircle, Mic, Key, Columns3, Lock, ExternalLink, Scale, Terminal, Trash2, Copy, ChevronDown, ChevronUp, Pencil } from "lucide-react";
+import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, Plus, X, Boxes, Shield, Play, PlayCircle, Sparkles, AlertCircle, Mic, Key, Columns3, Lock, ExternalLink, Scale, Terminal, Trash2, Copy, ChevronDown, ChevronUp, Pencil } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -1071,6 +1071,10 @@ export default function Editor() {
   const isDemoActive = demoQuery !== null;
   const showOnboarding = !isSignedIn && !isDemoActive;
 
+  // --- analysis state (lifted here so it survives tab switches) ---
+  const { progress: analysisProgress, ...analyzeMutation } = useAnalyzeQuery();
+  const autoAnalyzeTriggered = useRef(false);
+
   // --- landing page modals ---
   const [showTos, setShowTos] = useState(false);
   const [showDataPolicy, setShowDataPolicy] = useState(false);
@@ -1205,6 +1209,25 @@ export default function Editor() {
   // but fall back to the persisted draft or saved content so the Visual tab
   // (and other consumers) always have something even while a query is loading.
   const resolvedQueryContent = currentContent || effectiveQuery?.draftContent || effectiveQuery?.content || "";
+
+  // --- Analyze button handler (shared between Analysis and Visual tabs) ---
+  const handleAnalyze = useCallback(() => {
+    if (effectiveQueryId) {
+      analyzeMutation.mutate({ queryId: effectiveQueryId, dialect: detectedDialect, content: resolvedQueryContent });
+    }
+  }, [effectiveQueryId, detectedDialect, resolvedQueryContent]);
+
+  // Auto-trigger analysis when requested (e.g., after demo bootstrap)
+  useEffect(() => {
+    if (autoAnalyze && effectiveQueryId && resolvedQueryContent?.trim() && !analyzeMutation.isPending && !autoAnalyzeTriggered.current) {
+      autoAnalyzeTriggered.current = true;
+      analyzeMutation.mutate({ queryId: effectiveQueryId, dialect: detectedDialect, content: resolvedQueryContent });
+      setAutoAnalyze(false);
+    }
+    if (!autoAnalyze) {
+      autoAnalyzeTriggered.current = false;
+    }
+  }, [autoAnalyze, effectiveQueryId, resolvedQueryContent]);
 
   // Prepare schema data for VisualExplorer (needs column names as strings)
   const schemaData = useMemo(() => {
@@ -1719,30 +1742,47 @@ GROUP BY 1 ORDER BY 1`}
             <div className="h-full border-l border-border bg-card flex flex-col">
               {activeTab.type === "query" && (
                 <>
-                  {/* Right panel sub-tabs: Analysis | Visual */}
-                  <div className="flex border-b border-border flex-shrink-0">
-                    {([
-                      { key: "analysis" as RightPanelTab, label: "Analysis", icon: Sparkles },
-                      { key: "visual" as RightPanelTab, label: "Visual", icon: Boxes },
-                    ]).map(({ key, label, icon: Icon }) => (
-                      <button
-                        key={key}
-                        onClick={() => setRightPanelTab(key)}
-                        className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-medium border-b-2 transition-colors ${
-                          rightPanelTab === key
-                            ? "border-primary text-primary"
-                            : "border-transparent text-muted-foreground hover:text-foreground"
-                        }`}
+                  {/* Right panel sub-tabs: Analysis | Visual + shared Analyze button */}
+                  <div className="flex items-center border-b border-border flex-shrink-0">
+                    <div className="flex flex-1">
+                      {([
+                        { key: "analysis" as RightPanelTab, label: "Analysis", icon: Sparkles },
+                        { key: "visual" as RightPanelTab, label: "Visual", icon: Boxes },
+                      ]).map(({ key, label, icon: Icon }) => (
+                        <button
+                          key={key}
+                          onClick={() => setRightPanelTab(key)}
+                          className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-medium border-b-2 transition-colors ${
+                            rightPanelTab === key
+                              ? "border-primary text-primary"
+                              : "border-transparent text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="pr-3">
+                      <Button
+                        size="sm"
+                        onClick={handleAnalyze}
+                        disabled={analyzeMutation.isPending || !effectiveQueryId}
+                        className="h-7 text-xs"
                       >
-                        <Icon className="w-3.5 h-3.5" />
-                        {label}
-                      </button>
-                    ))}
+                        {analyzeMutation.isPending ? (
+                          <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                        ) : (
+                          <PlayCircle className="w-3 h-3 mr-1.5" />
+                        )}
+                        Analyze
+                      </Button>
+                    </div>
                   </div>
 
-                  {/* Sub-tab content */}
-                  <div className="flex-1 overflow-hidden">
-                    {rightPanelTab === "analysis" && (
+                  {/* Sub-tab content — both always mounted to survive tab switches */}
+                  <div className="flex-1 overflow-hidden relative">
+                    <div className={`h-full ${rightPanelTab === "analysis" ? "" : "hidden"}`}>
                       <FeedbackPanel
                         queryId={effectiveQueryId}
                         dialect={detectedDialect}
@@ -1757,56 +1797,39 @@ GROUP BY 1 ORDER BY 1`}
                             setCurrentContent(current.replace(beforeSql, afterSql));
                           }
                         }}
-                        autoAnalyze={autoAnalyze}
-                        onAutoAnalyzed={() => setAutoAnalyze(false)}
+                        isAnalyzing={analyzeMutation.isPending}
+                        analysisProgress={analysisProgress}
                       />
-                    )}
+                    </div>
 
-                    {rightPanelTab === "visual" && (
-                      <div className="h-full flex flex-col">
-                        {selectedWaterfallEdge ? (
-                          <>
-                            {/* Visual explorer with selected edge detail */}
-                            <div className="flex-1 min-h-0 overflow-hidden">
-                              <VisualExplorer
-                                queryContent={resolvedQueryContent}
-                                queryId={effectiveQueryId}
-                                schemas={schemaData}
-                                dialect={detectedDialect}
-                                onEdgeSelect={setSelectedWaterfallEdge}
-                                selectedEdgeId={selectedWaterfallEdge?.id ?? null}
-                                onAnalysisComplete={setWaterfallAnalysis}
-                                updaterRef={waterfallUpdaterRef}
-                              />
-                            </div>
-                            {/* Edge detail at bottom */}
-                            <div className="border-t border-border max-h-[40%] overflow-auto flex-shrink-0">
-                              <WaterfallDetailPanel
-                                selectedEdge={selectedWaterfallEdge}
-                                analysis={waterfallAnalysis}
-                                onUpdateEdge={(edgeId, updates) =>
-                                  waterfallUpdaterRef.current?.updateEdge(edgeId, updates)
-                                }
-                                onDeleteEdge={(edgeId) =>
-                                  waterfallUpdaterRef.current?.deleteEdge(edgeId)
-                                }
-                              />
-                            </div>
-                          </>
-                        ) : (
-                          <VisualExplorer
-                            queryContent={resolvedQueryContent}
-                            queryId={effectiveQueryId}
-                            schemas={schemaData}
-                            dialect={detectedDialect}
-                            onEdgeSelect={setSelectedWaterfallEdge}
-                            selectedEdgeId={null}
-                            onAnalysisComplete={setWaterfallAnalysis}
-                            updaterRef={waterfallUpdaterRef}
-                          />
-                        )}
+                    <div className={`h-full flex flex-col ${rightPanelTab === "visual" ? "" : "hidden"}`}>
+                      <div className={`${selectedWaterfallEdge ? "flex-1 min-h-0 overflow-hidden" : "h-full"}`}>
+                        <VisualExplorer
+                          queryContent={resolvedQueryContent}
+                          queryId={effectiveQueryId}
+                          schemas={schemaData}
+                          dialect={detectedDialect}
+                          onEdgeSelect={setSelectedWaterfallEdge}
+                          selectedEdgeId={selectedWaterfallEdge?.id ?? null}
+                          onAnalysisComplete={setWaterfallAnalysis}
+                          updaterRef={waterfallUpdaterRef}
+                        />
                       </div>
-                    )}
+                      {selectedWaterfallEdge && (
+                        <div className="border-t border-border max-h-[40%] overflow-auto flex-shrink-0">
+                          <WaterfallDetailPanel
+                            selectedEdge={selectedWaterfallEdge}
+                            analysis={waterfallAnalysis}
+                            onUpdateEdge={(edgeId, updates) =>
+                              waterfallUpdaterRef.current?.updateEdge(edgeId, updates)
+                            }
+                            onDeleteEdge={(edgeId) =>
+                              waterfallUpdaterRef.current?.deleteEdge(edgeId)
+                            }
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </>
               )}
