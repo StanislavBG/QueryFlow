@@ -132,11 +132,14 @@ function FeedbackCard({
   const SeverityIcon = severity.icon;
   const AgentIcon = agent.icon;
 
-  // Extract before/after SQL from metadata
+  // Extract structured fields from metadata
   const meta = (feedback.metadata || {}) as Record<string, unknown>;
   const beforeSql = typeof meta.beforeSql === "string" ? meta.beforeSql : null;
   const afterSql = typeof meta.afterSql === "string" ? meta.afterSql : null;
   const hasBeforeAfter = beforeSql && afterSql;
+  const reason = typeof meta.reason === "string" ? meta.reason : null;
+  const bestPractice = typeof meta.bestPractice === "string" ? meta.bestPractice : null;
+  const hasStructuredFields = reason || bestPractice;
 
   const isAccepted = feedback.isResolved && !feedback.isDismissed;
   const isDismissed = feedback.isResolved && feedback.isDismissed;
@@ -158,7 +161,12 @@ function FeedbackCard({
       onMouseLeave={() => onHover?.(null)}
     >
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => {
+          setExpanded(!expanded);
+          if (!expanded && feedback.lineNumber) {
+            onScrollToLine?.(feedback.lineNumber);
+          }
+        }}
         className="w-full flex items-start gap-2.5 p-3 text-left"
       >
         <SeverityIcon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${severity.color}`} />
@@ -208,23 +216,52 @@ function FeedbackCard({
 
       {expanded && (
         <div className="px-3 pb-3 space-y-3">
-          {/* Analysis message — primary content */}
-          <div className="pl-6.5 text-[13px] text-foreground/85 leading-[1.65] whitespace-pre-wrap">
-            {feedback.message}
-          </div>
+          {/* WHY section — concise reason for this finding */}
+          {reason && (
+            <div className="pl-6.5">
+              <span className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">Why</span>
+              <div className="mt-0.5 text-[13px] text-foreground/85 leading-[1.65]">
+                {reason}
+              </div>
+            </div>
+          )}
 
-          {/* Text suggestion (shown when no before/after available) */}
-          {feedback.suggestion && !hasBeforeAfter && (
-            <div className="ml-6.5 p-2.5 rounded-md bg-muted/50 border border-border">
-              <p className="text-xs text-foreground/80 leading-relaxed">
-                <span className="font-medium text-primary">Suggestion:</span> {feedback.suggestion}
-              </p>
+          {/* RECOMMENDATION section — best practice + suggestion */}
+          {(bestPractice || feedback.suggestion) && (
+            <div className="pl-6.5">
+              {hasStructuredFields && (
+                <span className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">Recommendation</span>
+              )}
+              {bestPractice && (
+                <div className="mt-0.5 text-[13px] text-foreground/85 leading-[1.65]">
+                  {bestPractice}
+                </div>
+              )}
+              {feedback.suggestion && (
+                <div className={`${bestPractice ? "mt-1.5" : "mt-0.5"} p-2.5 rounded-md bg-muted/50 border border-border`}>
+                  <p className="text-xs text-foreground/80 leading-relaxed">
+                    <span className="font-medium text-primary">Suggestion:</span> {feedback.suggestion}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
           {/* Before/After SQL comparison — side-by-side */}
           {hasBeforeAfter && (
             <SqlBeforeAfter before={beforeSql!} after={afterSql!} />
+          )}
+
+          {/* ANALYSIS section — deep-dive technical details */}
+          {feedback.message && (
+            <div className="pl-6.5">
+              {hasStructuredFields && (
+                <span className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">Analysis</span>
+              )}
+              <div className="mt-0.5 text-[13px] text-foreground/85 leading-[1.65] whitespace-pre-wrap">
+                {feedback.message}
+              </div>
+            </div>
           )}
 
           {/* Action buttons */}
