@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas, useDemoBootstrap, type DemoBootstrapResult } from "@/hooks/use-sql-queries";
+import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas, useSchemaVoiceContexts, useUpsertSchemaVoiceContext, useDemoBootstrap, type DemoBootstrapResult } from "@/hooks/use-sql-queries";
 import type { SqlQuery } from "@shared/schema";
 import { QueryDocumentList } from "@/components/QueryDocumentList";
 import { SqlEditor } from "@/components/SqlEditor";
@@ -19,7 +19,8 @@ import {
 } from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Play, Sparkles, AlertCircle } from "lucide-react";
+import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Play, Sparkles, AlertCircle, Mic, Key, Columns3 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 
 import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
@@ -55,6 +56,211 @@ const TAB_ICON: Record<WorkspaceTabType, React.ElementType> = {
   schemas: Table2,
   visual: Boxes,
 };
+
+// ---------------------------------------------------------------------------
+// Schema Context Panel — right sidebar for schemas tab
+// ---------------------------------------------------------------------------
+
+import { normalizeTables as normalizeTablesEditor } from "@/components/SchemaModule";
+import { useToast as useEditorToast } from "@/hooks/use-toast";
+import type { SchemaVoiceContext } from "@shared/schema";
+
+function SchemaContextPanel({ selection }: { selection: SchemaSelection | null }) {
+  const { data: schemas } = useUserSchemas();
+  const { data: voiceContexts } = useSchemaVoiceContexts(selection?.schemaId ?? null);
+  const upsertMutation = useUpsertSchemaVoiceContext();
+  const { toast } = useEditorToast();
+  const [editTranscript, setEditTranscript] = useState("");
+  const [editTarget, setEditTarget] = useState<{
+    type: "schema" | "table" | "column";
+    table?: string | null;
+    column?: string | null;
+  } | null>(null);
+
+  // Determine what context to show based on selection
+  const contextInfo = useMemo(() => {
+    if (!selection?.schemaId || !schemas) return null;
+    const schema = schemas.find((s) => s.id === selection.schemaId);
+    if (!schema) return null;
+
+    const tables = normalizeTablesEditor(schema.tables);
+
+    if (selection.columnName && selection.tableName) {
+      const table = tables.find((t) => t.name === selection.tableName);
+      const column = table?.columns.find((c) => c.name === selection.columnName);
+      return {
+        level: "column" as const,
+        label: `${selection.tableName}.${selection.columnName}`,
+        icon: column?.isPrimaryKey ? "pk" : "col",
+        type: column?.type || "",
+        targetType: "column" as const,
+        targetTable: selection.tableName,
+        targetColumn: selection.columnName,
+      };
+    }
+
+    if (selection.tableName) {
+      const table = tables.find((t) => t.name === selection.tableName);
+      return {
+        level: "table" as const,
+        label: selection.tableName,
+        icon: "table",
+        type: table ? `${table.columns.length} columns` : "",
+        targetType: "table" as const,
+        targetTable: selection.tableName,
+        targetColumn: null,
+      };
+    }
+
+    return {
+      level: "schema" as const,
+      label: schema.name,
+      icon: "schema",
+      type: `${tables.length} tables`,
+      targetType: "schema" as const,
+      targetTable: null,
+      targetColumn: null,
+    };
+  }, [selection, schemas]);
+
+  // Find existing voice context for current selection
+  const currentContext = useMemo(() => {
+    if (!voiceContexts || !contextInfo) return undefined;
+    return voiceContexts.find(
+      (c) =>
+        c.targetType === contextInfo.targetType &&
+        (c.targetTable ?? null) === (contextInfo.targetTable ?? null) &&
+        (c.targetColumn ?? null) === (contextInfo.targetColumn ?? null)
+    );
+  }, [voiceContexts, contextInfo]);
+
+  // Sync edit state when selection changes
+  useEffect(() => {
+    if (currentContext?.transcript) {
+      setEditTranscript(currentContext.transcript);
+    } else {
+      setEditTranscript("");
+    }
+    if (contextInfo) {
+      setEditTarget({
+        type: contextInfo.targetType,
+        table: contextInfo.targetTable,
+        column: contextInfo.targetColumn,
+      });
+    }
+  }, [currentContext?.transcript, currentContext?.id, contextInfo?.targetType, contextInfo?.targetTable, contextInfo?.targetColumn]);
+
+  const handleSave = useCallback(() => {
+    if (!selection?.schemaId || !editTarget || !editTranscript.trim()) return;
+    upsertMutation.mutate(
+      {
+        schemaId: selection.schemaId,
+        targetType: editTarget.type,
+        targetTable: editTarget.table ?? null,
+        targetColumn: editTarget.column ?? null,
+        transcript: editTranscript.trim(),
+      },
+      {
+        onSuccess: () => toast({ title: "Context saved" }),
+        onError: () => toast({ title: "Failed to save", variant: "destructive" }),
+      }
+    );
+  }, [selection?.schemaId, editTarget, editTranscript, upsertMutation, toast]);
+
+  // No selection — show guide
+  if (!selection?.schemaId || !contextInfo) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground px-6 text-center">
+        <Mic className="w-8 h-8 mb-3 opacity-40" />
+        <p className="text-sm font-medium">Schema Context</p>
+        <p className="text-xs mt-1 opacity-60">
+          Select a schema, table, or column to view and edit context.
+          Context feeds into query analysis and voice-to-query generation.
+        </p>
+      </div>
+    );
+  }
+
+  const hasContext = !!currentContext?.transcript;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="p-3 border-b border-border flex-shrink-0">
+        <div className="flex items-center gap-2">
+          {contextInfo.icon === "pk" && <Key className="w-4 h-4 text-amber-500" />}
+          {contextInfo.icon === "col" && <Columns3 className="w-4 h-4 text-muted-foreground" />}
+          {contextInfo.icon === "table" && <Table2 className="w-4 h-4 text-emerald-500" />}
+          {contextInfo.icon === "schema" && <Database className="w-4 h-4 text-primary" />}
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold truncate">{contextInfo.label}</p>
+            <p className="text-[10px] text-muted-foreground">{contextInfo.type}</p>
+          </div>
+          <Mic className={`w-4 h-4 flex-shrink-0 ${hasContext ? "text-muted-foreground/40" : "text-red-500"}`} />
+        </div>
+      </div>
+
+      {/* Context editor */}
+      <div className="flex-1 flex flex-col p-3 gap-3">
+        <div>
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+            Context for {contextInfo.level}
+          </p>
+          <p className="text-[10px] text-muted-foreground/60 mb-2">
+            Describe what this {contextInfo.level} represents. This context is used by AI when analyzing queries and generating SQL from voice input.
+          </p>
+        </div>
+
+        <Textarea
+          value={editTranscript}
+          onChange={(e) => setEditTranscript(e.target.value)}
+          placeholder={`Add context about this ${contextInfo.level}... e.g., business meaning, typical values, relationships, constraints`}
+          className="text-xs flex-1 min-h-[100px] resize-none"
+        />
+
+        <Button
+          size="sm"
+          className="h-8 text-xs w-full"
+          onClick={handleSave}
+          disabled={!editTranscript.trim() || upsertMutation.isPending}
+        >
+          {upsertMutation.isPending ? (
+            <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+          ) : null}
+          {currentContext ? "Update Context" : "Save Context"}
+        </Button>
+
+        {/* Show all contexts for this schema */}
+        {voiceContexts && voiceContexts.length > 0 && (
+          <div className="mt-2 border-t border-border pt-3">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+              All Context ({voiceContexts.length})
+            </p>
+            <div className="space-y-2 max-h-[300px] overflow-auto">
+              {voiceContexts.map((vc) => {
+                const label =
+                  vc.targetType === "column" ? `${vc.targetTable}.${vc.targetColumn}` :
+                  vc.targetType === "table" ? vc.targetTable :
+                  "Schema";
+                return (
+                  <div key={vc.id} className="rounded border border-border/50 p-2 bg-muted/20">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      {vc.targetType === "column" && <Columns3 className="w-2.5 h-2.5 text-muted-foreground" />}
+                      {vc.targetType === "table" && <Table2 className="w-2.5 h-2.5 text-emerald-500" />}
+                      {vc.targetType === "schema" && <Database className="w-2.5 h-2.5 text-primary" />}
+                      <span className="text-[10px] font-mono font-medium">{label}</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-relaxed line-clamp-3">{vc.transcript}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Theme hook
@@ -775,19 +981,7 @@ GROUP BY 1 ORDER BY 1`}
               )}
 
               {activeTab.type === "schemas" && (
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground px-6 text-center">
-                  <Table2 className="w-8 h-8 mb-3 opacity-40" />
-                  <p className="text-sm font-medium">
-                    {schemaSelection?.columnName ? "Column Details" :
-                     schemaSelection?.tableName ? "Table Details" :
-                     schemaSelection?.schemaId ? "Schema Details" : "Schema Details"}
-                  </p>
-                  <p className="text-xs mt-1 opacity-60">
-                    {schemaSelection?.schemaId
-                      ? "Use the mic icons to add voice or text context to schema items. This context feeds into query analysis."
-                      : "Select a schema in the left panel to view details, relationships, and ERD visualization."}
-                  </p>
-                </div>
+                <SchemaContextPanel selection={schemaSelection} />
               )}
 
               {activeTab.type === "visual" && (
