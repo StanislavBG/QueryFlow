@@ -52,8 +52,8 @@ export function clearLlmErrors(): void {
 
 let client: OpenAI | null = null;
 
-/** Default model for Replit AI integrations (OpenAI-compatible proxy). */
-const MODEL = "gpt-4o";
+/** Default model — GPT-4.1: 1M context, 32k output, best for code/SQL analysis. */
+const MODEL = "gpt-4.1";
 
 function getClient(): OpenAI {
   if (!client) {
@@ -246,9 +246,8 @@ export async function llmAnalyzeQuery(
     ? `\nThe user has prioritized the following analysis areas (emphasize these in your output, but still report critical findings in other areas):\n${enabledCategories.map(c => `- ${c}`).join("\n")}`
     : "";
 
-  // Scale max_tokens based on input size: short queries get 32k, large procedures/batches get 64k
-  const sqlLineCount = sql.split("\n").length;
-  const maxTokens = sqlLineCount >= 100 ? 65536 : 32768;
+  // GPT-4.1 supports up to 32768 output tokens
+  const maxTokens = 32768;
 
   const response = await openai.chat.completions.create({
     model: MODEL,

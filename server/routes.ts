@@ -395,7 +395,7 @@ export async function registerRoutes(
     const dialect = req.body.dialect || "Standard SQL";
 
     // Assemble all the same context the analyze pipeline would use
-    const blocks: Array<{ key: string; label: string; content: string; itemCount?: number }> = [];
+    const blocks: Array<{ key: string; label: string; content: string; itemCount?: number; charCount?: number; description?: string }> = [];
 
     // 1. Query
     blocks.push({
@@ -430,17 +430,19 @@ export async function registerRoutes(
       blocks.push({
         key: "schemas",
         label: "Schema Definitions",
+        description: "Table and column definitions parsed from your uploaded schemas. Helps the LLM validate column references, types, and joins.",
         content: schemaContext,
         itemCount: schemas.length,
       });
     }
 
-    // 5. Documents
+    // 5. Documents (user-uploaded reference docs from Schemas tab)
     const docs = await storage.getDocuments();
     if (docs.length > 0) {
       blocks.push({
         key: "documents",
         label: "Reference Documents",
+        description: "Uploaded via the Documents section in the Schemas tab. Sent as additional context to help the LLM understand your database environment.",
         content: docs.map(d => d.content).join("\n\n---\n\n"),
         itemCount: docs.length,
       });
@@ -484,6 +486,21 @@ export async function registerRoutes(
       key: "llm_status",
       label: "LLM Status",
       content: isLLMConfigured() ? "Configured" : "Not configured — set AI_INTEGRATIONS_OPENAI_API_KEY",
+    });
+
+    // Add charCount to each block so client can estimate tokens
+    for (const block of blocks) {
+      block.charCount = block.content.length;
+    }
+
+    // Estimate system prompt overhead (~2800 chars for the analyze prompt template)
+    const systemPromptChars = 2800;
+    blocks.unshift({
+      key: "system_prompt",
+      label: "System Prompt",
+      description: "Fixed LLM instructions covering analysis rules, output format, and dialect handling. Not editable.",
+      content: `~${systemPromptChars} characters of LLM instructions (dialect rules, output schema, category definitions)`,
+      charCount: systemPromptChars,
     });
 
     res.json(blocks);
