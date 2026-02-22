@@ -152,8 +152,8 @@ export function VoiceContextButton({
     targetType === "table" ? targetTable :
     "schema";
 
-  const iconSize = isSmall ? "w-2.5 h-2.5" : "w-5 h-5";
-  const btnSize = isSmall ? "h-4 w-4 p-0" : "h-8 w-8 p-0";
+  const iconSize = isSmall ? "w-3 h-3" : "w-5 h-5";
+  const btnSize = isSmall ? "h-5 w-5 p-0" : "h-8 w-8 p-0";
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>

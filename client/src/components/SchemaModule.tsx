@@ -32,6 +32,15 @@ import type { UserSchema, ParsedTable, ParsedColumn, SchemaVoiceContext } from "
 // This is NOT a parser — it just maps field shapes for old vs. new data.
 // ---------------------------------------------------------------------------
 
+/** Sort columns: primary keys first, then alphabetically by name. */
+function sortColumns(columns: ParsedColumn[]): ParsedColumn[] {
+  return [...columns].sort((a, b) => {
+    if (a.isPrimaryKey && !b.isPrimaryKey) return -1;
+    if (!a.isPrimaryKey && b.isPrimaryKey) return 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 export function normalizeTables(tables: unknown): ParsedTable[] {
   if (!Array.isArray(tables)) return [];
   return tables.map((t: any) => {
@@ -193,7 +202,7 @@ function SchemaTreeNode({
             {/* Columns under this table */}
             {isTableExpanded && (
               <div className="ml-5 border-l border-border/50 pl-2 py-0.5">
-                {table.columns.map((col, ci) => {
+                {sortColumns(table.columns).map((col, ci) => {
                   const isColSelected = selection?.schemaId === schema.id && selection?.tableName === table.name && selection?.columnName === col.name;
                   return (
                     <div
@@ -632,7 +641,7 @@ export function SchemaERD() {
 
               {/* Columns */}
               <div className="divide-y divide-border/50">
-                {table.columns.map((col, ci) => {
+                {sortColumns(table.columns).map((col, ci) => {
                   const isFK = outgoing.some((r) => r.fromCol.toLowerCase() === col.name.toLowerCase());
 
                   return (
