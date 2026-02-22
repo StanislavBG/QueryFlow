@@ -874,54 +874,29 @@ export async function llmAnalyzeWaterfall(
     ? `\n\nKnown database schema:\n${options.schemas}`
     : "";
 
+  const systemPrompt = `Decompose the SQL into a DAG of data flow. ${dialectHint}${schemaHint}
+
+Node types: "source_table" (base tables in FROM/JOIN), "cte" (WITH AS), "temp_table" (#temp/CREATE TEMP), "derived_table" (subquery in FROM), "final_output" (final SELECT or target INSERT table).
+
+Edge types: "join" (JOIN), "create_insert" (CREATE/INSERT INTO SELECT), "cte_definition" (CTE body), "subquery_ref" (derived subquery), "select_from" (simple SELECT FROM).
+
+Rules:
+- stepIndex: 0 for source tables, increment for each transformation layer. Same stepIndex = side-by-side.
+- For JOINs of N sources into 1 destination: one edge per source, same sqlStatement.
+- sqlStatement: verbatim SQL from input for that data movement.
+- joinDetails: for JOIN edges only, the ON condition.
+- IDs: "node_0","node_1"... and "edge_0","edge_1"...
+- Every node must have at least one edge.
+
+Return ONLY JSON:
+{"nodes":[{"id":"node_0","name":"tbl","nodeType":"source_table","columns":["c1"],"stepIndex":0}],"edges":[{"id":"edge_0","fromNodeId":"node_0","toNodeId":"node_1","edgeType":"join","sqlStatement":"SELECT...","joinDetails":"JOIN ON..."}],"summary":"brief description"}`;
+
   const response = await ai.chat.completions.create({
     model: MODEL,
-    max_tokens: 16384,
+    max_tokens: 8192,
     messages: [
-      {
-        role: "system",
-        content: `You are a SQL procedure analyzer. Given a SQL query or stored procedure, decompose it into a directed acyclic graph (DAG) showing how data flows from source tables through intermediate transformations to the final output.
-
-${dialectHint}${schemaHint}
-
-RULES:
-1. Identify every distinct data entity: base tables (in FROM/JOIN), CTEs (WITH clauses), temporary tables (#temp or CREATE TEMP TABLE), derived subqueries (aliased subselects in FROM), and the final output.
-2. Assign each entity a nodeType:
-   - "source_table": base/persistent tables referenced as data sources
-   - "cte": WITH ... AS (...) common table expressions
-   - "temp_table": CREATE TEMP TABLE, INSERT INTO #table, or session-scoped tables
-   - "derived_table": subquery aliased in FROM clause
-   - "final_output": the final SELECT result set, or the persistent table being written to at the end
-3. Order nodes by stepIndex (integer, 0 = topmost). Source tables with no dependencies are stepIndex 0. Each subsequent transformation gets a higher stepIndex. Multiple nodes can share the same stepIndex (they appear side-by-side in the same row).
-4. For each data-flow relationship, create an edge with:
-   - edgeType: one of "join", "create_insert", "cte_definition", "subquery_ref", "select_from"
-     - "join": SQL JOINs multiple tables together
-     - "create_insert": CREATE TABLE AS or INSERT INTO ... SELECT
-     - "cte_definition": defines a CTE from source tables
-     - "subquery_ref": references a derived subquery
-     - "select_from": simple SELECT FROM (final read)
-   - sqlStatement: the EXACT SQL text (verbatim from the input, preserving whitespace) that performs this data movement. For JOINs include the full SELECT...FROM...JOIN...ON block. For CREATE/INSERT include the full statement. For CTEs include the CTE definition body.
-   - joinDetails: for JOIN edges only, the specific join condition e.g. "LEFT JOIN orders ON c.id = o.customer_id"
-5. If multiple source tables are JOINed into one result, create one edge per source table all pointing to the same destination node. They may share the same sqlStatement.
-6. The final node should be the persistent table being written to (INSERT/CREATE) or the final SELECT output. Use nodeType "final_output".
-7. Every node must be connected by at least one edge (no orphans).
-8. Use unique string IDs: "node_0", "node_1", ... for nodes and "edge_0", "edge_1", ... for edges.
-
-Return ONLY a JSON object with this exact structure (no extra text, no markdown fences):
-{
-  "nodes": [
-    { "id": "node_0", "name": "table_name", "nodeType": "source_table", "columns": ["col1", "col2"], "stepIndex": 0 }
-  ],
-  "edges": [
-    { "id": "edge_0", "fromNodeId": "node_0", "toNodeId": "node_2", "edgeType": "join", "sqlStatement": "SELECT ... FROM ... JOIN ...", "joinDetails": "INNER JOIN ON ..." }
-  ],
-  "summary": "Brief description of the data flow"
-}`,
-      },
-      {
-        role: "user",
-        content: sql,
-      },
+      { role: "system", content: systemPrompt },
+      { role: "user", content: sql },
     ],
   });
 

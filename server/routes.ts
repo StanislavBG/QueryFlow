@@ -540,9 +540,14 @@ export async function registerRoutes(
       const { userId: wfUserId } = getAuth(req);
       logActivity(wfUserId, "waterfall.analyze", "waterfall");
 
-      // Gather schema context for richer analysis
-      const schemas = await storage.getUserSchemas();
-      const schemaContext = await buildSchemaContext(schemas);
+      // Gather schema context for richer analysis (non-fatal if it fails)
+      let schemaContext: string | undefined;
+      try {
+        const schemas = await storage.getUserSchemas();
+        schemaContext = await buildSchemaContext(schemas);
+      } catch (schemaErr) {
+        console.warn("[waterfall] Could not load schema context:", schemaErr);
+      }
 
       const result = await llmAnalyzeWaterfall(input.content, {
         dialect: input.dialect,
@@ -557,8 +562,11 @@ export async function registerRoutes(
           field: err.errors[0].path.join('.'),
         });
       }
-      console.error("[waterfall] Analysis failed:", err);
-      res.status(500).json({ message: err instanceof Error ? err.message : "Waterfall analysis failed" });
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const errStack = err instanceof Error ? err.stack : undefined;
+      console.error("[waterfall] Analysis failed:", errMsg);
+      if (errStack) console.error("[waterfall] Stack:", errStack);
+      res.status(500).json({ message: errMsg || "Waterfall analysis failed" });
     }
   });
 
