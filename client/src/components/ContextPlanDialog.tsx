@@ -73,55 +73,52 @@ function formatTokens(tokens: number): string {
   return String(tokens);
 }
 
-function ContextBlockRow({ block }: { block: ContextBlock }) {
+function getBlockTokens(block: ContextBlock): number {
+  return block.charCount ? estimateTokens(block.charCount) : estimateTokens(block.content.length);
+}
+
+interface BillLineItemProps {
+  block: ContextBlock;
+  totalTokens: number;
+}
+
+function BillLineItem({ block, totalTokens }: BillLineItemProps) {
   const [open, setOpen] = useState(false);
   const Icon = blockIconMap[block.key] || Activity;
   const color = blockColorMap[block.key] || "text-muted-foreground";
   const description = block.description;
-  const isShort = block.content.length < 100 && !block.content.includes("\n");
-  const tokens = block.charCount ? estimateTokens(block.charCount) : estimateTokens(block.content.length);
-
-  // Short blocks (dialect, status) render inline without collapsible
-  if (isShort) {
-    return (
-      <div className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-card">
-        <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${color}`} />
-        <span className="text-xs font-medium text-foreground">{block.label}</span>
-        {block.itemCount !== undefined && (
-          <Badge variant="secondary" className="text-[9px] h-4 px-1.5">{block.itemCount}</Badge>
-        )}
-        <Badge variant="outline" className="text-[9px] h-4 px-1.5 font-mono ml-auto">
-          ~{formatTokens(tokens)} tok
-        </Badge>
-        <span className="text-xs text-muted-foreground font-mono truncate max-w-[40%] text-right">
-          {block.content}
-        </span>
-      </div>
-    );
-  }
+  const tokens = getBlockTokens(block);
+  const pct = totalTokens > 0 ? (tokens / totalTokens) * 100 : 0;
+  const chars = block.charCount || block.content.length;
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger asChild>
-        <button className="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-card hover:bg-accent/50 transition-colors text-left">
-          <ChevronRight className={`w-3 h-3 flex-shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
+        <button className="w-full flex items-center gap-2 px-3 py-2 border-b border-border/40 hover:bg-accent/30 transition-colors text-left group">
+          <ChevronRight className={`w-3 h-3 flex-shrink-0 text-muted-foreground/50 transition-transform ${open ? "rotate-90" : ""}`} />
           <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${color}`} />
-          <span className="text-xs font-medium text-foreground">{block.label}</span>
+          <span className="text-xs font-medium text-foreground truncate">
+            {block.label}
+          </span>
           {block.itemCount !== undefined && (
-            <Badge variant="secondary" className="text-[9px] h-4 px-1.5">{block.itemCount}</Badge>
+            <Badge variant="secondary" className="text-[9px] h-4 px-1.5 flex-shrink-0">{block.itemCount}</Badge>
           )}
-          <div className="flex items-center gap-2 ml-auto">
-            <Badge variant="outline" className="text-[9px] h-4 px-1.5 font-mono">
-              ~{formatTokens(tokens)} tok
-            </Badge>
-            <span className="text-[10px] text-muted-foreground">
-              {block.charCount?.toLocaleString() || block.content.length.toLocaleString()} chars
+          {/* Right-aligned numeric columns */}
+          <div className="flex items-center gap-0 ml-auto flex-shrink-0 font-mono tabular-nums">
+            <span className="text-[10px] text-muted-foreground/60 w-[70px] text-right">
+              {chars.toLocaleString()}
+            </span>
+            <span className="text-xs font-medium text-foreground w-[70px] text-right">
+              {formatTokens(tokens)}
+            </span>
+            <span className="text-[10px] text-muted-foreground w-[48px] text-right">
+              {pct < 0.1 && pct > 0 ? "<0.1" : pct.toFixed(1)}%
             </span>
           </div>
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="ml-3 mt-1 mb-2 pl-4 border-l-2 border-border">
+        <div className="ml-8 mr-3 mt-1 mb-2 pl-3 border-l-2 border-border/60">
           {description && (
             <p className="text-[10px] text-muted-foreground italic mb-1.5">{description}</p>
           )}
@@ -152,13 +149,17 @@ export function ContextPlanDialog({ queryId, dialect, queryContent }: ContextPla
   }, [dialogOpen, queryId, dialect, queryContent]);
 
   const blocks = contextMutation.data;
-  const totalBlocks = blocks?.length || 0;
 
   // Calculate total estimated tokens across all context blocks
   const totalChars = blocks?.reduce((sum, b) => sum + (b.charCount || b.content.length), 0) || 0;
   const totalTokens = estimateTokens(totalChars);
   const contextLimit = MODEL.contextTokens; // 1M for GPT-4.1
   const isOverLimit = totalTokens > contextLimit;
+
+  // Sort blocks by token count descending (highest cost first)
+  const sortedBlocks = blocks
+    ? [...blocks].sort((a, b) => getBlockTokens(b) - getBlockTokens(a))
+    : null;
 
   return (
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -173,7 +174,7 @@ export function ContextPlanDialog({ queryId, dialect, queryContent }: ContextPla
             <DialogTitle className="text-sm">Analysis Context Plan</DialogTitle>
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="text-[10px] h-5">
-                {totalBlocks} block{totalBlocks !== 1 ? "s" : ""}
+                {sortedBlocks?.length || 0} item{(sortedBlocks?.length || 0) !== 1 ? "s" : ""}
               </Badge>
               <Button
                 size="sm"
@@ -193,25 +194,22 @@ export function ContextPlanDialog({ queryId, dialect, queryContent }: ContextPla
           </p>
         </DialogHeader>
 
-        {/* Token usage summary bar */}
-        {blocks && blocks.length > 0 && (
-          <div className={`flex items-center justify-between px-3 py-2 rounded-md border text-xs ${
-            isOverLimit
-              ? "bg-destructive/10 border-destructive/30 text-destructive"
-              : "bg-muted/50 border-border text-muted-foreground"
-          }`}>
-            <span className="font-medium">
-              Estimated context: <span className="font-mono font-bold">{formatTokens(totalTokens)}</span> tokens
-              <span className="opacity-60 ml-1">({totalChars.toLocaleString()} chars)</span>
-            </span>
-            <span className="font-mono text-[10px]">
-              {MODEL.name} context: {formatTokens(contextLimit)}
-            </span>
+        {/* Column headers */}
+        {sortedBlocks && sortedBlocks.length > 0 && (
+          <div className="flex items-center gap-2 px-3 pt-1 pb-1.5 border-b border-border text-[10px] text-muted-foreground/70 uppercase tracking-wider font-medium">
+            {/* Spacer for chevron + icon */}
+            <div className="w-[22px] flex-shrink-0" />
+            <span className="truncate">Context Block</span>
+            <div className="flex items-center gap-0 ml-auto flex-shrink-0 font-mono">
+              <span className="w-[70px] text-right">Chars</span>
+              <span className="w-[70px] text-right">Tokens</span>
+              <span className="w-[48px] text-right">%</span>
+            </div>
           </div>
         )}
 
         <ScrollArea className="flex-1 -mx-6 px-6">
-          <div className="space-y-1.5 py-2">
+          <div className="py-0">
             {contextMutation.isPending && !blocks ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -220,9 +218,9 @@ export function ContextPlanDialog({ queryId, dialect, queryContent }: ContextPla
               <div className="text-center py-8">
                 <p className="text-xs text-destructive">Failed to load context</p>
               </div>
-            ) : blocks && blocks.length > 0 ? (
-              blocks.map((block) => (
-                <ContextBlockRow key={block.key} block={block} />
+            ) : sortedBlocks && sortedBlocks.length > 0 ? (
+              sortedBlocks.map((block) => (
+                <BillLineItem key={block.key} block={block} totalTokens={totalTokens} />
               ))
             ) : (
               <div className="text-center py-8">
@@ -231,6 +229,53 @@ export function ContextPlanDialog({ queryId, dialect, queryContent }: ContextPla
             )}
           </div>
         </ScrollArea>
+
+        {/* Bill total footer */}
+        {sortedBlocks && sortedBlocks.length > 0 && (
+          <div className={`rounded-md border px-3 py-2 ${
+            isOverLimit
+              ? "bg-destructive/10 border-destructive/30"
+              : "bg-muted/40 border-border"
+          }`}>
+            {/* Total row */}
+            <div className="flex items-center gap-2">
+              <span className={`text-xs font-bold uppercase tracking-wide ${
+                isOverLimit ? "text-destructive" : "text-foreground"
+              }`}>
+                Total
+              </span>
+              <div className="flex items-center gap-0 ml-auto flex-shrink-0 font-mono tabular-nums">
+                <span className={`text-[10px] w-[70px] text-right ${
+                  isOverLimit ? "text-destructive/70" : "text-muted-foreground"
+                }`}>
+                  {totalChars.toLocaleString()}
+                </span>
+                <span className={`text-sm font-bold w-[70px] text-right ${
+                  isOverLimit ? "text-destructive" : "text-foreground"
+                }`}>
+                  {formatTokens(totalTokens)}
+                </span>
+                <span className={`text-[10px] font-medium w-[48px] text-right ${
+                  isOverLimit ? "text-destructive/70" : "text-muted-foreground"
+                }`}>
+                  100%
+                </span>
+              </div>
+            </div>
+            {/* Context limit line */}
+            <div className="flex items-center justify-between mt-1 pt-1 border-t border-border/40">
+              <span className="text-[10px] text-muted-foreground">
+                {MODEL.name} context window
+              </span>
+              <span className={`text-[10px] font-mono tabular-nums ${
+                isOverLimit ? "text-destructive font-medium" : "text-muted-foreground"
+              }`}>
+                {formatTokens(totalTokens)} / {formatTokens(contextLimit)} tokens
+                {isOverLimit && " — over limit"}
+              </span>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
