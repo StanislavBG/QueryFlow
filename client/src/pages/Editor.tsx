@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Play, Sparkles, Zap, AlertCircle, AlertTriangle, Info, ArrowRight } from "lucide-react";
+import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Play, Sparkles, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
@@ -333,25 +333,29 @@ export default function Editor() {
             <h1 className="text-sm font-semibold text-foreground">QueryFlow</h1>
           </div>
 
-          <div className="h-4 w-px bg-border" />
+          {!showOnboarding && (
+            <>
+              <div className="h-4 w-px bg-border" />
 
-          {/* Detected SQL dialect */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex items-center gap-1.5">
-                <Database className="w-3.5 h-3.5 text-muted-foreground" />
-                <Badge
-                  variant="outline"
-                  className={`text-[10px] h-5 px-2 font-mono ${dialectMeta.color}`}
-                >
-                  {detectedDialect}
-                </Badge>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p className="text-xs">Detected SQL dialect based on query syntax</p>
-            </TooltipContent>
-          </Tooltip>
+              {/* Detected SQL dialect — only shown when content exists */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1.5">
+                    <Database className="w-3.5 h-3.5 text-muted-foreground" />
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] h-5 px-2 font-mono ${dialectMeta.color}`}
+                    >
+                      {detectedDialect}
+                    </Badge>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p className="text-xs">Detected SQL dialect based on query syntax</p>
+                </TooltipContent>
+              </Tooltip>
+            </>
+          )}
         </div>
 
         {/* Right: theme + auth + settings */}
@@ -414,6 +418,128 @@ export default function Editor() {
 
       {/* Main content */}
       <div className="flex-1 overflow-hidden">
+        {showOnboarding ? (
+          /* ── Full-width landing page for unauthenticated users ── */
+          <div className="h-full overflow-auto bg-background">
+            <div className="max-w-5xl mx-auto px-8 py-16 space-y-14">
+              {/* Hero */}
+              <div className="text-center space-y-6">
+                <div className="inline-flex p-4 rounded-2xl bg-gradient-to-br from-primary/10 to-purple-600/10 border border-primary/10">
+                  <FileCode2 className="w-14 h-14 text-primary" />
+                </div>
+
+                <h1 className="text-3xl md:text-4xl font-bold text-foreground tracking-tight">
+                  Your SQL Query Analyzer
+                </h1>
+
+                <p className="text-base md:text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+                  QueryFlow challenges you to write better SQL. Multi-agent AI analysis catches bugs,
+                  performance issues, and security risks — you stay in complete control of every decision.
+                </p>
+
+                <Button
+                  onClick={handleDemoBootstrap}
+                  disabled={demoMutation.isPending}
+                  className="h-12 px-10 text-base gap-2.5 rounded-full shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5 transition-all duration-300 bg-gradient-to-r from-primary to-purple-600 text-primary-foreground font-semibold"
+                >
+                  {demoMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Generating flawed query...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-5 h-5" />
+                      Try It — Find 9 Mistakes in a Real Query
+                    </>
+                  )}
+                </Button>
+
+                {demoMutation.isPending && (
+                  <p className="text-xs text-muted-foreground/60">
+                    Loading e-commerce schema &amp; analytics query with intentional mistakes...
+                  </p>
+                )}
+              </div>
+
+              {/* Before / After showcase */}
+              <div className="grid md:grid-cols-2 gap-4 max-w-4xl mx-auto">
+                <div className="rounded-lg border border-destructive/20 bg-card overflow-hidden">
+                  <div className="px-4 py-2 bg-destructive/10 border-b border-destructive/20">
+                    <p className="text-xs font-semibold text-destructive flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5" /> Before — Common Mistakes
+                    </p>
+                  </div>
+                  <pre className="p-4 text-[11px] font-mono text-muted-foreground leading-relaxed overflow-x-auto whitespace-pre">
+{`SELECT *
+FROM orders
+LEFT JOIN order_items
+  ON orders.id = order_items.order_id
+-- no date filter, scans all history
+-- LEFT JOIN inflates revenue with returns
+-- SELECT * pulls unnecessary columns
+GROUP BY DATE_TRUNC('month', order_date)`}
+                  </pre>
+                </div>
+
+                <div className="rounded-lg border border-emerald-500/20 bg-card overflow-hidden">
+                  <div className="px-4 py-2 bg-emerald-500/10 border-b border-emerald-500/20">
+                    <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" /> After — With QueryFlow Fixes
+                    </p>
+                  </div>
+                  <pre className="p-4 text-[11px] font-mono text-muted-foreground leading-relaxed overflow-x-auto whitespace-pre">
+{`SELECT
+  DATE_TRUNC('month', o.order_date) AS month,
+  SUM(oi.amount) AS revenue
+FROM orders o
+INNER JOIN order_items oi
+  ON o.id = oi.order_id
+WHERE o.status NOT IN ('refunded','cancelled')
+  AND o.order_date >= CURRENT_DATE
+      - INTERVAL '12 months'
+GROUP BY 1 ORDER BY 1`}
+                  </pre>
+                </div>
+              </div>
+
+              {/* Feature highlights */}
+              <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+                {([
+                  {
+                    icon: Database,
+                    title: "Schema Context",
+                    desc: "Enrich your schema with domain knowledge. Add voice or text annotations at the schema, table, or column level so AI analysis deeply understands your data model.",
+                    color: "text-cyan-500",
+                  },
+                  {
+                    icon: Sparkles,
+                    title: "AI Analysis",
+                    desc: "Multi-agent analyzer that challenges you to improve every query. Catch bugs, performance issues, and security risks — with complete control over your decisions.",
+                    color: "text-primary",
+                  },
+                  {
+                    icon: Boxes,
+                    title: "Visual Explorer",
+                    desc: "Visualize stored procedures and queries like never before. Complete lineage tracking with a dynamic visual query editor.",
+                    color: "text-emerald-500",
+                  },
+                ] as const).map((feat) => {
+                  const Icon = feat.icon;
+                  return (
+                    <div key={feat.title} className="p-5 rounded-xl border border-border bg-card/50 space-y-3">
+                      <div className="p-2.5 rounded-lg bg-accent/50 w-fit">
+                        <Icon className={`w-5 h-5 ${feat.color}`} />
+                      </div>
+                      <h3 className="text-sm font-semibold text-foreground">{feat.title}</h3>
+                      <p className="text-xs text-muted-foreground leading-relaxed">{feat.desc}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : (
         <ResizablePanelGroup direction="horizontal" className="h-full">
           {/* Left sidebar – contextual to active workspace tab */}
           <ResizablePanel defaultSize={20} minSize={16} maxSize={32}>
@@ -446,79 +572,29 @@ export default function Editor() {
 
               {/* Tab content */}
               <div className="flex-1 overflow-hidden">
-                {showOnboarding ? (
-                  /* ── Onboarding: feature overview ── */
-                  <div className="h-full overflow-auto p-4 space-y-5">
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-2">
-                        <FileCode2 className="w-5 h-5 text-primary" />
-                        <h2 className="text-base font-bold text-gradient">QueryFlow</h2>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        AI-powered SQL analysis that catches what code review misses.
-                      </p>
-                    </div>
-
-                    <div className="h-px bg-border" />
-
-                    <div className="space-y-3">
-                      {([
-                        { icon: Sparkles, title: "AI Analysis", desc: "Multi-agent analysis catches bugs, performance issues, and security risks across 10+ categories.", color: "text-primary" },
-                        { icon: Table2, title: "Schema-Aware", desc: "Upload DDL schemas for context-aware validation of joins, column references, and types.", color: "text-cyan-500" },
-                        { icon: MessageSquare, title: "Ask AI", desc: "Chat with AI about your SQL queries. Get explanations, alternatives, and best practices.", color: "text-violet-500" },
-                        { icon: Boxes, title: "Visual Explorer", desc: "See query relationships and data flow as an interactive visual graph.", color: "text-emerald-500" },
-                        { icon: Zap, title: "Smart Format", desc: "One-click LLM-powered formatting to ISO/IEC 9075 standards.", color: "text-amber-500" },
-                      ] as const).map((feat) => {
-                        const Icon = feat.icon;
-                        return (
-                          <div key={feat.title} className="flex items-start gap-2.5">
-                            <div className="mt-0.5 p-1.5 rounded-md bg-accent/50">
-                              <Icon className={`w-3.5 h-3.5 ${feat.color}`} />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-xs font-semibold text-foreground">{feat.title}</p>
-                              <p className="text-[10px] text-muted-foreground leading-relaxed">{feat.desc}</p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="h-px bg-border" />
-
-                    <div className="text-center space-y-2">
-                      <p className="text-[10px] text-muted-foreground">Try the interactive demo to see it in action</p>
-                      <ArrowRight className="w-3.5 h-3.5 text-muted-foreground mx-auto animate-pulse" />
-                    </div>
-                  </div>
-                ) : (
-                  /* ── Normal tab content ── */
-                  <>
-                    {leftTab === "queries" && (
-                      <QueryDocumentList
-                        selectedId={selectedQueryId}
-                        onSelect={handleQuerySelect}
-                      />
-                    )}
-                    {leftTab === "ask" && (
-                      <AskModule
-                        queryContent={resolvedQueryContent}
-                        dialect={detectedDialect}
-                      />
-                    )}
-                    {leftTab === "schemas" && (
-                      <SchemaTreePanel
-                        selection={schemaSelection}
-                        onSelect={setSchemaSelection}
-                      />
-                    )}
-                    {leftTab === "visual" && (
-                      <VisualExplorer
-                        queryContent={resolvedQueryContent}
-                        schemas={schemaData}
-                      />
-                    )}
-                  </>
+                {leftTab === "queries" && (
+                  <QueryDocumentList
+                    selectedId={selectedQueryId}
+                    onSelect={handleQuerySelect}
+                  />
+                )}
+                {leftTab === "ask" && (
+                  <AskModule
+                    queryContent={resolvedQueryContent}
+                    dialect={detectedDialect}
+                  />
+                )}
+                {leftTab === "schemas" && (
+                  <SchemaTreePanel
+                    selection={schemaSelection}
+                    onSelect={setSchemaSelection}
+                  />
+                )}
+                {leftTab === "visual" && (
+                  <VisualExplorer
+                    queryContent={resolvedQueryContent}
+                    schemas={schemaData}
+                  />
                 )}
               </div>
             </div>
@@ -640,57 +716,6 @@ export default function Editor() {
                         onCursorLineChange={handleCursorLineChange}
                         scrollToLine={scrollToLine}
                       />
-                    ) : showOnboarding ? (
-                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-4 px-6">
-                        {/* ── Onboarding: center hero ── */}
-                        <div className="p-4 rounded-2xl bg-gradient-to-br from-primary/10 to-purple-600/10 border border-primary/10">
-                          <FileCode2 className="w-12 h-12 text-primary" />
-                        </div>
-
-                        <h2 className="text-xl md:text-2xl font-bold text-foreground text-center">
-                          Write SQL. Get instant AI feedback.
-                        </h2>
-
-                        <p className="text-sm text-muted-foreground max-w-md text-center leading-relaxed">
-                          See QueryFlow analyze a real-world analytics query with 9 intentional business analyst mistakes — revenue inflation, missing filters, wrong JOINs, and more.
-                        </p>
-
-                        <Button
-                          onClick={handleDemoBootstrap}
-                          disabled={demoMutation.isPending}
-                          className="h-11 px-8 text-sm gap-2 rounded-full shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5 transition-all duration-300 bg-gradient-to-r from-primary to-purple-600 text-primary-foreground font-semibold"
-                        >
-                          {demoMutation.isPending ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              Loading demo...
-                            </>
-                          ) : (
-                            <>
-                              <Play className="w-4 h-4" />
-                              Try Demo
-                              <ArrowRight className="w-4 h-4" />
-                            </>
-                          )}
-                        </Button>
-
-                        {demoMutation.isPending && (
-                          <p className="text-[10px] text-muted-foreground/60 max-w-[280px] text-center">
-                            Loading a pre-generated e-commerce schema and analytical query...
-                          </p>
-                        )}
-
-                        {/* Decorative SQL preview */}
-                        <div className="mt-4 w-full max-w-lg rounded-lg border border-border/50 bg-card/50 p-4 font-mono text-[11px] leading-relaxed text-muted-foreground/40 select-none overflow-hidden">
-                          <p><span className="text-primary/30 font-semibold">WITH</span> monthly_revenue <span className="text-primary/30 font-semibold">AS</span> (</p>
-                          <p className="pl-4"><span className="text-primary/30 font-semibold">SELECT</span> DATE_TRUNC(<span className="text-emerald-500/30">'month'</span>, order_date),</p>
-                          <p className="pl-8">SUM(total_amount) <span className="text-primary/30 font-semibold">AS</span> revenue</p>
-                          <p className="pl-4"><span className="text-primary/30 font-semibold">FROM</span> orders</p>
-                          <p className="pl-4"><span className="text-primary/30 font-semibold">LEFT JOIN</span> order_items <span className="text-primary/30 font-semibold">ON</span> ...</p>
-                          <p>)</p>
-                          <p><span className="text-primary/30 font-semibold">SELECT</span> * <span className="text-primary/30 font-semibold">FROM</span> monthly_revenue;</p>
-                        </div>
-                      </div>
                     ) : (
                       /* ── Authenticated empty state — query onboarding ── */
                       <QueryOnboarding
@@ -730,106 +755,23 @@ export default function Editor() {
           <ResizablePanel defaultSize={30} minSize={20} maxSize={45}>
             <div className="h-full border-l border-border bg-card">
               {activeTab.type === "query" && (
-                showOnboarding ? (
-                  /* ── Onboarding: mock feedback preview ── */
-                  <div className="flex flex-col h-full">
-                    <div className="p-3 border-b border-border">
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-primary" />
-                        <h3 className="text-sm font-semibold text-foreground">AI Analysis Preview</h3>
-                      </div>
-                      <p className="text-[10px] text-muted-foreground mt-1">
-                        This is what real feedback looks like
-                      </p>
-                    </div>
-
-                    <div className="flex-1 overflow-auto p-3 space-y-2.5">
-                      {/* Mock error card */}
-                      <div className="rounded-md border border-destructive/20 bg-destructive/5 p-3">
-                        <div className="flex items-start gap-2.5">
-                          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-destructive" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-foreground leading-tight">Revenue Inflation Risk</p>
-                            <div className="flex items-center gap-1.5 mt-1 mb-1.5">
-                              <Badge variant="outline" className="text-[10px] h-4">
-                                <Zap className="w-2.5 h-2.5 mr-1 text-muted-foreground" />
-                                Performance
-                              </Badge>
-                              <span className="text-[10px] text-muted-foreground">Line 12</span>
-                            </div>
-                            <p className="text-xs text-muted-foreground leading-relaxed">
-                              The SUM(total_amount) doesn't subtract returns or refunds, overstating revenue by up to 15%. This is a common mistake in analytics queries...
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Mock warning card */}
-                      <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3">
-                        <div className="flex items-start gap-2.5">
-                          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-foreground leading-tight">Missing Date Range Filter</p>
-                            <div className="flex items-center gap-1.5 mt-1 mb-1.5">
-                              <Badge variant="outline" className="text-[10px] h-4">
-                                <AlertCircle className="w-2.5 h-2.5 mr-1 text-muted-foreground" />
-                                Correctness
-                              </Badge>
-                              <span className="text-[10px] text-muted-foreground">Line 5</span>
-                            </div>
-                            <p className="text-xs text-muted-foreground leading-relaxed">
-                              No date boundary on a "monthly" report — this scans all historical data, increasing query cost and returning misleading aggregates...
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Mock info card */}
-                      <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
-                        <div className="flex items-start gap-2.5">
-                          <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-primary" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-foreground leading-tight">Consider Window Functions</p>
-                            <div className="flex items-center gap-1.5 mt-1 mb-1.5">
-                              <Badge variant="outline" className="text-[10px] h-4">
-                                <Sparkles className="w-2.5 h-2.5 mr-1 text-muted-foreground" />
-                                Alternative
-                              </Badge>
-                              <span className="text-[10px] text-muted-foreground">Line 28</span>
-                            </div>
-                            <p className="text-xs text-muted-foreground leading-relaxed">
-                              ROW_NUMBER() could replace the self-join for ranking, improving readability and reducing the query's execution plan complexity...
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="p-3 border-t border-border">
-                      <p className="text-[10px] text-muted-foreground text-center">
-                        These are examples — try the demo to see real analysis
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <FeedbackPanel
-                    queryId={effectiveQueryId}
-                    dialect={detectedDialect}
-                    queryContent={resolvedQueryContent}
-                    hoveredLine={hoveredEditorLine}
-                    activeLine={cursorLine}
-                    onFeedbackHover={handleFeedbackHover}
-                    onScrollToLine={handleScrollToLine}
-                    onApplySuggestion={(beforeSql, afterSql) => {
-                      const current = resolvedQueryContent;
-                      if (current.includes(beforeSql)) {
-                        setCurrentContent(current.replace(beforeSql, afterSql));
-                      }
-                    }}
-                    autoAnalyze={autoAnalyze}
-                    onAutoAnalyzed={() => setAutoAnalyze(false)}
-                  />
-                )
+                <FeedbackPanel
+                  queryId={effectiveQueryId}
+                  dialect={detectedDialect}
+                  queryContent={resolvedQueryContent}
+                  hoveredLine={hoveredEditorLine}
+                  activeLine={cursorLine}
+                  onFeedbackHover={handleFeedbackHover}
+                  onScrollToLine={handleScrollToLine}
+                  onApplySuggestion={(beforeSql, afterSql) => {
+                    const current = resolvedQueryContent;
+                    if (current.includes(beforeSql)) {
+                      setCurrentContent(current.replace(beforeSql, afterSql));
+                    }
+                  }}
+                  autoAnalyze={autoAnalyze}
+                  onAutoAnalyzed={() => setAutoAnalyze(false)}
+                />
               )}
 
               {activeTab.type === "schemas" && (
@@ -860,6 +802,7 @@ export default function Editor() {
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>
+        )}
       </div>
     </div>
   );
