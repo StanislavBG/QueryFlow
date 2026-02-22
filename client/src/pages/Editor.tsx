@@ -1291,7 +1291,7 @@ GROUP BY 1 ORDER BY 1`}
                 )}
 
                 {activeTab.type === "visual" && (
-                  <div className="h-full overflow-auto">
+                  <div className="h-full flex flex-col">
                     <VisualExplorer
                       queryContent={resolvedQueryContent}
                       schemas={schemaData}
