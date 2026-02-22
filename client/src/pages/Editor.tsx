@@ -7,6 +7,7 @@ import { FeedbackPanel } from "@/components/FeedbackPanel";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { ContextPlanDialog } from "@/components/ContextPlanDialog";
 import { AskModule } from "@/components/AskModule";
+import { QueryOnboarding } from "@/components/QueryOnboarding";
 import { SchemaTreePanel, normalizeTables } from "@/components/SchemaModule";
 import type { SchemaSelection } from "@/components/SchemaModule";
 import { SchemaDetailView } from "@/components/SchemaDetailView";
@@ -639,70 +640,65 @@ export default function Editor() {
                         onCursorLineChange={handleCursorLineChange}
                         scrollToLine={scrollToLine}
                       />
-                    ) : (
+                    ) : showOnboarding ? (
                       <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-4 px-6">
-                        {showOnboarding ? (
-                          /* ── Onboarding: center hero ── */
-                          <>
-                            <div className="p-4 rounded-2xl bg-gradient-to-br from-primary/10 to-purple-600/10 border border-primary/10">
-                              <FileCode2 className="w-12 h-12 text-primary" />
-                            </div>
+                        {/* ── Onboarding: center hero ── */}
+                        <div className="p-4 rounded-2xl bg-gradient-to-br from-primary/10 to-purple-600/10 border border-primary/10">
+                          <FileCode2 className="w-12 h-12 text-primary" />
+                        </div>
 
-                            <h2 className="text-xl md:text-2xl font-bold text-foreground text-center">
-                              Write SQL. Get instant AI feedback.
-                            </h2>
+                        <h2 className="text-xl md:text-2xl font-bold text-foreground text-center">
+                          Write SQL. Get instant AI feedback.
+                        </h2>
 
-                            <p className="text-sm text-muted-foreground max-w-md text-center leading-relaxed">
-                              See QueryFlow analyze a real-world analytics query with 9 intentional business analyst mistakes — revenue inflation, missing filters, wrong JOINs, and more.
-                            </p>
+                        <p className="text-sm text-muted-foreground max-w-md text-center leading-relaxed">
+                          See QueryFlow analyze a real-world analytics query with 9 intentional business analyst mistakes — revenue inflation, missing filters, wrong JOINs, and more.
+                        </p>
 
-                            <Button
-                              onClick={handleDemoBootstrap}
-                              disabled={demoMutation.isPending}
-                              className="h-11 px-8 text-sm gap-2 rounded-full shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5 transition-all duration-300 bg-gradient-to-r from-primary to-purple-600 text-primary-foreground font-semibold"
-                            >
-                              {demoMutation.isPending ? (
-                                <>
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                  Loading demo...
-                                </>
-                              ) : (
-                                <>
-                                  <Play className="w-4 h-4" />
-                                  Try Demo
-                                  <ArrowRight className="w-4 h-4" />
-                                </>
-                              )}
-                            </Button>
+                        <Button
+                          onClick={handleDemoBootstrap}
+                          disabled={demoMutation.isPending}
+                          className="h-11 px-8 text-sm gap-2 rounded-full shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5 transition-all duration-300 bg-gradient-to-r from-primary to-purple-600 text-primary-foreground font-semibold"
+                        >
+                          {demoMutation.isPending ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Loading demo...
+                            </>
+                          ) : (
+                            <>
+                              <Play className="w-4 h-4" />
+                              Try Demo
+                              <ArrowRight className="w-4 h-4" />
+                            </>
+                          )}
+                        </Button>
 
-                            {demoMutation.isPending && (
-                              <p className="text-[10px] text-muted-foreground/60 max-w-[280px] text-center">
-                                Loading a pre-generated e-commerce schema and analytical query...
-                              </p>
-                            )}
-
-                            {/* Decorative SQL preview */}
-                            <div className="mt-4 w-full max-w-lg rounded-lg border border-border/50 bg-card/50 p-4 font-mono text-[11px] leading-relaxed text-muted-foreground/40 select-none overflow-hidden">
-                              <p><span className="text-primary/30 font-semibold">WITH</span> monthly_revenue <span className="text-primary/30 font-semibold">AS</span> (</p>
-                              <p className="pl-4"><span className="text-primary/30 font-semibold">SELECT</span> DATE_TRUNC(<span className="text-emerald-500/30">'month'</span>, order_date),</p>
-                              <p className="pl-8">SUM(total_amount) <span className="text-primary/30 font-semibold">AS</span> revenue</p>
-                              <p className="pl-4"><span className="text-primary/30 font-semibold">FROM</span> orders</p>
-                              <p className="pl-4"><span className="text-primary/30 font-semibold">LEFT JOIN</span> order_items <span className="text-primary/30 font-semibold">ON</span> ...</p>
-                              <p>)</p>
-                              <p><span className="text-primary/30 font-semibold">SELECT</span> * <span className="text-primary/30 font-semibold">FROM</span> monthly_revenue;</p>
-                            </div>
-                          </>
-                        ) : (
-                          /* ── Authenticated empty state ── */
-                          <>
-                            <FileCode2 className="w-10 h-10 opacity-30" />
-                            <p className="text-sm font-medium">Welcome to QueryFlow</p>
-                            <p className="text-xs opacity-60 max-w-[280px] text-center">
-                              Create your first query from the sidebar to get started. Paste any SQL and hit Analyze to get instant, actionable feedback.
-                            </p>
-                          </>
+                        {demoMutation.isPending && (
+                          <p className="text-[10px] text-muted-foreground/60 max-w-[280px] text-center">
+                            Loading a pre-generated e-commerce schema and analytical query...
+                          </p>
                         )}
+
+                        {/* Decorative SQL preview */}
+                        <div className="mt-4 w-full max-w-lg rounded-lg border border-border/50 bg-card/50 p-4 font-mono text-[11px] leading-relaxed text-muted-foreground/40 select-none overflow-hidden">
+                          <p><span className="text-primary/30 font-semibold">WITH</span> monthly_revenue <span className="text-primary/30 font-semibold">AS</span> (</p>
+                          <p className="pl-4"><span className="text-primary/30 font-semibold">SELECT</span> DATE_TRUNC(<span className="text-emerald-500/30">'month'</span>, order_date),</p>
+                          <p className="pl-8">SUM(total_amount) <span className="text-primary/30 font-semibold">AS</span> revenue</p>
+                          <p className="pl-4"><span className="text-primary/30 font-semibold">FROM</span> orders</p>
+                          <p className="pl-4"><span className="text-primary/30 font-semibold">LEFT JOIN</span> order_items <span className="text-primary/30 font-semibold">ON</span> ...</p>
+                          <p>)</p>
+                          <p><span className="text-primary/30 font-semibold">SELECT</span> * <span className="text-primary/30 font-semibold">FROM</span> monthly_revenue;</p>
+                        </div>
                       </div>
+                    ) : (
+                      /* ── Authenticated empty state — query onboarding ── */
+                      <QueryOnboarding
+                        onQueryCreated={(id) => {
+                          setSelectedQueryId(id);
+                          setCurrentContent("");
+                        }}
+                      />
                     )}
                   </>
                 )}
