@@ -1,10 +1,11 @@
-// LLM model definition — OpenAI GPT-4o via Replit AI integrations
+// LLM model definition — OpenAI GPT-4.1 via AI integrations
 
 export const MODEL = {
-  id: "gpt-4o",
-  name: "GPT-4o",
-  maxQueryChars: 680_000,
-  contextTokens: 128_000,
+  id: "gpt-4.1",
+  name: "GPT-4.1",
+  maxQueryChars: 3_000_000,
+  contextTokens: 1_000_000,
+  maxOutputTokens: 32_768,
 } as const;
 
 // ── SQL Dialect Detection ────────────────────────────────────────────
