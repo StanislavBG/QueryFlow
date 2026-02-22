@@ -731,6 +731,104 @@ const EDGE_TYPE_LABELS: Record<string, { label: string; colorClass: string }> = 
   select_from:    { label: "SELECT",          colorClass: "bg-muted text-muted-foreground" },
 };
 
+/** Formats raw SQL with basic indentation for readability */
+function formatSqlForDisplay(sql: string): string {
+  if (!sql) return sql;
+  // Normalize whitespace
+  let s = sql.replace(/\r\n/g, "\n").replace(/\t/g, "  ");
+  // Add newlines before major keywords (only if not already at line start)
+  const majorKw = /\b(SELECT|FROM|WHERE|JOIN|INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|FULL\s+JOIN|CROSS\s+JOIN|ON|AND|OR|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|UNION|EXCEPT|INTERSECT|INSERT\s+INTO|VALUES|UPDATE|SET|DELETE\s+FROM|CREATE\s+TABLE|CREATE\s+TEMP|INTO|AS)\b/gi;
+  s = s.replace(majorKw, (match) => {
+    return "\n" + match.toUpperCase();
+  });
+  // Indent clauses under SELECT/FROM/WHERE etc.
+  const lines = s.split("\n").filter((l) => l.trim());
+  const indentKw = new Set([
+    "SELECT", "FROM", "WHERE", "JOIN", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN",
+    "FULL JOIN", "CROSS JOIN", "GROUP BY", "ORDER BY", "HAVING", "LIMIT",
+    "INSERT INTO", "CREATE TABLE", "CREATE TEMP", "UPDATE", "DELETE FROM",
+    "UNION", "EXCEPT", "INTERSECT", "VALUES", "SET", "INTO",
+  ]);
+  const result: string[] = [];
+  let indent = 0;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const firstWord = trimmed.split(/[\s(]/)[0].toUpperCase();
+    const twoWord = trimmed.split(/[\s(]/).slice(0, 2).join(" ").toUpperCase();
+    if (indentKw.has(twoWord) || indentKw.has(firstWord)) {
+      // Major clause — no indent
+      result.push(trimmed);
+      indent = 1;
+    } else if (firstWord === "ON" || firstWord === "AND" || firstWord === "OR") {
+      result.push("  " + trimmed);
+    } else {
+      result.push("  ".repeat(indent) + trimmed);
+    }
+  }
+  return result.join("\n");
+}
+
+/** SQL keyword-highlighted rendering */
+const SQL_KEYWORDS = new Set([
+  "SELECT","FROM","WHERE","JOIN","INNER","LEFT","RIGHT","FULL","CROSS","OUTER",
+  "ON","AND","OR","NOT","IN","EXISTS","BETWEEN","LIKE","IS","NULL","AS","CASE",
+  "WHEN","THEN","ELSE","END","GROUP","BY","ORDER","ASC","DESC","HAVING","LIMIT",
+  "OFFSET","UNION","ALL","EXCEPT","INTERSECT","INSERT","INTO","VALUES","UPDATE",
+  "SET","DELETE","CREATE","TABLE","TEMP","TEMPORARY","IF","DROP","ALTER","INDEX",
+  "PRIMARY","KEY","FOREIGN","REFERENCES","DISTINCT","TOP","WITH","RECURSIVE",
+  "CAST","COALESCE","IFNULL","COUNT","SUM","AVG","MIN","MAX","OVER","PARTITION",
+  "ROW_NUMBER","RANK","DENSE_RANK","LAG","LEAD",
+]);
+
+function SqlHighlighted({ sql }: { sql: string }) {
+  const formatted = formatSqlForDisplay(sql);
+  const lines = formatted.split("\n");
+
+  return (
+    <div className="text-xs font-mono leading-5">
+      {lines.map((line, i) => {
+        // Tokenize: split by word boundaries, keep whitespace
+        const tokens = line.split(/(\s+|[(),;.*=<>!]+)/);
+        return (
+          <div key={i} className="flex">
+            <span className="select-none text-muted-foreground/40 w-7 text-right mr-3 flex-shrink-0">
+              {i + 1}
+            </span>
+            <span className="whitespace-pre-wrap break-words">
+              {tokens.map((tok, j) => {
+                if (SQL_KEYWORDS.has(tok.toUpperCase().trim())) {
+                  return (
+                    <span key={j} className="text-blue-500 font-semibold">
+                      {tok}
+                    </span>
+                  );
+                }
+                // String literals
+                if (/^'.*'$/.test(tok.trim())) {
+                  return (
+                    <span key={j} className="text-emerald-500">
+                      {tok}
+                    </span>
+                  );
+                }
+                // Numbers
+                if (/^\d+(\.\d+)?$/.test(tok.trim())) {
+                  return (
+                    <span key={j} className="text-amber-500">
+                      {tok}
+                    </span>
+                  );
+                }
+                return <span key={j}>{tok}</span>;
+              })}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function WaterfallDetailPanel({
   selectedEdge,
   analysis,
@@ -782,20 +880,26 @@ function WaterfallDetailPanel({
       <div className="flex-1 overflow-auto p-4">
         {selectedEdge.joinDetails && (
           <div className="mb-3">
-            <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+            <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
               Join Condition
             </h4>
-            <p className="text-xs font-mono text-foreground bg-muted/50 rounded px-2 py-1">
-              {selectedEdge.joinDetails}
-            </p>
+            <div className="bg-muted/50 rounded-lg px-3 py-2 border border-border">
+              <SqlHighlighted sql={selectedEdge.joinDetails} />
+            </div>
           </div>
         )}
-        <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+        <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
           SQL Statement
         </h4>
-        <pre className="text-xs font-mono text-foreground bg-muted/50 rounded p-3 whitespace-pre-wrap break-words overflow-auto max-h-[60vh] border border-border">
-          {selectedEdge.sqlStatement || "No SQL captured for this connection."}
-        </pre>
+        {selectedEdge.sqlStatement ? (
+          <div className="bg-muted/50 rounded-lg p-3 border border-border overflow-auto max-h-[60vh]">
+            <SqlHighlighted sql={selectedEdge.sqlStatement} />
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground italic">
+            No SQL captured for this connection.
+          </p>
+        )}
       </div>
     </div>
   );
