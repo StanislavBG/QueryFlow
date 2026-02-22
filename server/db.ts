@@ -114,6 +114,16 @@ export async function ensureTables(): Promise<void> {
         created_at TIMESTAMP DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS demo_versions (
+        id SERIAL PRIMARY KEY,
+        schema_name VARCHAR(255) NOT NULL,
+        schema_ddl TEXT NOT NULL,
+        schema_tables JSONB DEFAULT '[]',
+        query_title VARCHAR(255) NOT NULL,
+        query_content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS schema_voice_context (
         id SERIAL PRIMARY KEY,
         user_id VARCHAR(255),

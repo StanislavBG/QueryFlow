@@ -10,6 +10,7 @@ import {
   appUsers,
   activityEvents,
   schemaVoiceContext,
+  demoVersions,
   type CreateDocumentRequest,
   type DocumentResponse,
   type InsertSqlQuery,
@@ -32,6 +33,8 @@ import {
   type ParsedTable,
   type SchemaVoiceContext,
   type InsertSchemaVoiceContext,
+  type DemoVersion,
+  type InsertDemoVersion,
 } from "@shared/schema";
 import { encrypt, decrypt, encryptJson, decryptJson } from "./encryption";
 
@@ -90,6 +93,12 @@ export interface IStorage {
   getSchemaVoiceContexts(schemaId: number): Promise<SchemaVoiceContext[]>;
   upsertSchemaVoiceContext(data: InsertSchemaVoiceContext): Promise<SchemaVoiceContext>;
   deleteSchemaVoiceContext(id: number): Promise<boolean>;
+
+  // Demo Versions
+  getDemoVersions(): Promise<DemoVersion[]>;
+  getDemoVersionCount(): Promise<number>;
+  getRandomDemoVersion(): Promise<DemoVersion | undefined>;
+  createDemoVersion(data: InsertDemoVersion): Promise<DemoVersion>;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,8 +170,9 @@ export class DatabaseStorage implements IStorage {
   async getSqlQueries(userId?: string): Promise<SqlQuery[]> {
     let rows: SqlQuery[];
     if (userId) {
+      // Authenticated users see only their own queries (no demo/null-user rows)
       rows = await db.select().from(sqlQueries)
-        .where(or(eq(sqlQueries.userId, userId), isNull(sqlQueries.userId)))
+        .where(eq(sqlQueries.userId, userId))
         .orderBy(desc(sqlQueries.updatedAt));
     } else {
       rows = await db.select().from(sqlQueries).orderBy(desc(sqlQueries.updatedAt));
@@ -309,8 +319,9 @@ export class DatabaseStorage implements IStorage {
   async getUserSchemas(userId?: string): Promise<UserSchema[]> {
     let rows: UserSchema[];
     if (userId) {
+      // Authenticated users see only their own schemas (no demo/null-user rows)
       rows = await db.select().from(userSchemas)
-        .where(or(eq(userSchemas.userId, userId), isNull(userSchemas.userId)))
+        .where(eq(userSchemas.userId, userId))
         .orderBy(desc(userSchemas.updatedAt));
     } else {
       rows = await db.select().from(userSchemas).orderBy(desc(userSchemas.updatedAt));
@@ -519,6 +530,26 @@ export class DatabaseStorage implements IStorage {
   async deleteSchemaVoiceContext(id: number): Promise<boolean> {
     const result = await db.delete(schemaVoiceContext).where(eq(schemaVoiceContext.id, id)).returning();
     return result.length > 0;
+  }
+
+  // Demo Versions
+  async getDemoVersions(): Promise<DemoVersion[]> {
+    return await db.select().from(demoVersions).orderBy(desc(demoVersions.createdAt));
+  }
+
+  async getDemoVersionCount(): Promise<number> {
+    const [result] = await db.select({ count: count() }).from(demoVersions);
+    return result?.count ?? 0;
+  }
+
+  async getRandomDemoVersion(): Promise<DemoVersion | undefined> {
+    const [row] = await db.select().from(demoVersions).orderBy(sql`RANDOM()`).limit(1);
+    return row;
+  }
+
+  async createDemoVersion(data: InsertDemoVersion): Promise<DemoVersion> {
+    const [created] = await db.insert(demoVersions).values(data).returning();
+    return created;
   }
 }
 
