@@ -714,11 +714,11 @@ Return a JSON object:
   const result = extractJsonObject(text);
 
   if (!result || typeof result.content !== "string") {
-    throw new Error("Failed to generate query from voice input");
+    throw new Error("Failed to generate query from voice input — LLM returned unparseable response");
   }
 
   return {
-    title: (result.title as string) || "Voice Query",
+    title: typeof result.title === "string" ? result.title : "Voice Query",
     content: result.content as string,
   };
 }
