@@ -126,13 +126,18 @@ export interface AnalysisProgress {
   label: string;
 }
 
+export interface AnalyzeResult {
+  feedback: QueryFeedbackRow[];
+  waterfall: import("@shared/waterfall").WaterfallMergeResult | null;
+}
+
 export function useAnalyzeQuery() {
   const queryClient = useQueryClient();
   const [progress, setProgress] = useState<AnalysisProgress | null>(null);
 
-  const mutation = useMutation<QueryFeedbackRow[], Error, { queryId: number; dialect?: string; content?: string }>({
+  const mutation = useMutation<AnalyzeResult, Error, { queryId: number; dialect?: string; content?: string }>({
     mutationFn: async ({ queryId, dialect, content }) => {
-      setProgress({ step: 0, total: 2, label: "Starting analysis" });
+      setProgress({ step: 0, total: 3, label: "Starting analysis" });
 
       const res = await fetch(buildUrl(api.feedback.analyze.path, { id: queryId }), {
         method: "POST",
@@ -146,7 +151,8 @@ export function useAnalyzeQuery() {
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let results: QueryFeedbackRow[] = [];
+      let feedbackResults: QueryFeedbackRow[] = [];
+      let waterfallResult: import("@shared/waterfall").WaterfallMergeResult | null = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -165,7 +171,8 @@ export function useAnalyzeQuery() {
             setProgress({ step: data.step, total: data.total, label: data.label });
           }
           if (data.done) {
-            results = data.results;
+            feedbackResults = data.results;
+            waterfallResult = data.waterfall ?? null;
           }
           if (data.error) {
             throw new Error(data.message || "Analysis failed");
@@ -173,15 +180,16 @@ export function useAnalyzeQuery() {
         }
       }
 
-      return results;
+      return { feedback: feedbackResults, waterfall: waterfallResult };
     },
-    onSuccess: (results, { queryId }) => {
+    onSuccess: (result, { queryId }) => {
       setProgress(null);
       if (queryId > 0) {
         queryClient.invalidateQueries({ queryKey: ["feedback", queryId] });
+        queryClient.invalidateQueries({ queryKey: ["waterfall-data", queryId] });
       } else {
         // Demo mode: seed feedback cache directly (no DB persistence)
-        queryClient.setQueryData(["feedback", queryId], results);
+        queryClient.setQueryData(["feedback", queryId], result.feedback);
       }
     },
     onError: () => {
