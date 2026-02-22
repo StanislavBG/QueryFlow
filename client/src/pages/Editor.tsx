@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Play, Sparkles, AlertCircle, Mic, Key, Columns3, Lock, ExternalLink, Scale, Terminal, Trash2, Copy, ChevronDown, ChevronUp, Pencil } from "lucide-react";
+import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, Plus, X, Boxes, Shield, Play, Sparkles, AlertCircle, Mic, Key, Columns3, Lock, ExternalLink, Scale, Terminal, Trash2, Copy, ChevronDown, ChevronUp, Pencil } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -38,7 +38,7 @@ import {
 // Workspace tab types
 // ---------------------------------------------------------------------------
 
-type WorkspaceTabType = "query" | "schemas" | "visual";
+type WorkspaceTabType = "query" | "schemas";
 
 interface WorkspaceTab {
   id: string;
@@ -55,8 +55,10 @@ function newTabId(): string {
 const TAB_ICON: Record<WorkspaceTabType, React.ElementType> = {
   query: FileCode2,
   schemas: Table2,
-  visual: Boxes,
 };
+
+// Right-panel sub-tab for query workspace
+type RightPanelTab = "analysis" | "visual";
 
 // ---------------------------------------------------------------------------
 // Schema Context Panel — right sidebar for schemas tab
@@ -1091,10 +1093,13 @@ export default function Editor() {
   // Schema drill-down selection state (for schemas tab)
   const [schemaSelection, setSchemaSelection] = useState<SchemaSelection | null>(null);
 
-  // Waterfall flow state (for visual tab)
+  // Waterfall flow state (for visual sub-tab in right panel)
   const [waterfallAnalysis, setWaterfallAnalysis] = useState<import("@shared/waterfall").WaterfallAnalysis | null>(null);
   const [selectedWaterfallEdge, setSelectedWaterfallEdge] = useState<import("@shared/waterfall").WaterfallEdge | null>(null);
   const waterfallUpdaterRef = useRef<WaterfallUpdaters | null>(null);
+
+  // Right panel sub-tab (Analysis vs Visual) — only applies when activeTab.type === "query"
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("analysis");
 
   // Hover/cursor linking state between editor and feedback panel
   const [hoveredEditorLine, setHoveredEditorLine] = useState<number | null>(null);
@@ -1112,7 +1117,7 @@ export default function Editor() {
   const dialectMeta = DIALECT_META[detectedDialect];
 
   // --- left sidebar tab (contextual to workspace tab type) ---
-  type LeftTabKey = "queries" | "ask" | "schemas" | "visual";
+  type LeftTabKey = "queries" | "ask" | "schemas";
 
   const leftTabOptions: LeftTabKey[] = useMemo(() => {
     switch (activeTab.type) {
@@ -1120,8 +1125,6 @@ export default function Editor() {
         return ["queries", "ask"];
       case "schemas":
         return ["schemas"];
-      case "visual":
-        return ["queries", "visual"];
     }
   }, [activeTab.type]);
 
@@ -1217,20 +1220,15 @@ export default function Editor() {
 
   // --- workspace tab actions ---
   const addTab = useCallback((type: WorkspaceTabType) => {
-    // Schemas and Visual are singletons — focus the existing tab if one exists
-    if (type === "schemas" || type === "visual") {
+    // Schemas is a singleton — focus the existing tab if one exists
+    if (type === "schemas") {
       setTabs((prev) => {
         const existing = prev.find((t) => t.type === type);
         if (existing) {
           setActiveTabId(existing.id);
           return prev;
         }
-        const titles: Record<WorkspaceTabType, string> = {
-          query: "Query",
-          schemas: "Schemas",
-          visual: "Visual",
-        };
-        const tab: WorkspaceTab = { id: newTabId(), type, title: titles[type] };
+        const tab: WorkspaceTab = { id: newTabId(), type, title: "Schemas" };
         setActiveTabId(tab.id);
         return [...prev, tab];
       });
@@ -1259,7 +1257,6 @@ export default function Editor() {
     queries: { icon: FileCode2, label: "Queries", tooltip: "Manage SQL queries" },
     ask: { icon: MessageSquare, label: "Ask", tooltip: "Ask questions about your SQL" },
     schemas: { icon: Table2, label: "Schemas", tooltip: "Manage schema definitions" },
-    visual: { icon: GitBranch, label: "Visual", tooltip: "Visual query explorer" },
   };
 
   return (
@@ -1574,18 +1571,6 @@ GROUP BY 1 ORDER BY 1`}
                     onSelect={setSchemaSelection}
                   />
                 )}
-                {leftTab === "visual" && (
-                  <VisualExplorer
-                    queryContent={resolvedQueryContent}
-                    queryId={effectiveQueryId}
-                    schemas={schemaData}
-                    dialect={detectedDialect}
-                    onEdgeSelect={setSelectedWaterfallEdge}
-                    selectedEdgeId={selectedWaterfallEdge?.id ?? null}
-                    onAnalysisComplete={setWaterfallAnalysis}
-                    updaterRef={waterfallUpdaterRef}
-                  />
-                )}
               </div>
             </div>
           </ResizablePanel>
@@ -1645,11 +1630,8 @@ GROUP BY 1 ORDER BY 1`}
 
                 {/* Right: pinned singleton tabs */}
                 <div className="flex items-center border-l border-border flex-shrink-0">
-                  {(["schemas", "visual"] as const).map((type) => {
+                  {(["schemas"] as const).map((type) => {
                     const isActive = activeTab.type === type;
-                    const icon = type === "schemas" ? Table2 : Boxes;
-                    const Icon = icon;
-                    const label = type === "schemas" ? "Schemas" : "Visual";
                     const tab = tabs.find((t) => t.type === type);
                     return (
                       <Tooltip key={type}>
@@ -1662,8 +1644,8 @@ GROUP BY 1 ORDER BY 1`}
                                 : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50"
                             }`}
                           >
-                            <Icon className="w-3 h-3 flex-shrink-0" />
-                            <span>{label}</span>
+                            <Table2 className="w-3 h-3 flex-shrink-0" />
+                            <span>Schemas</span>
                             {tab && tabs.length > 1 && (
                               <span
                                 role="button"
@@ -1679,7 +1661,7 @@ GROUP BY 1 ORDER BY 1`}
                           </button>
                         </TooltipTrigger>
                         <TooltipContent side="bottom">
-                          <p className="text-xs">{type === "schemas" ? "ERD & schema definitions" : "Visual query explorer"}</p>
+                          <p className="text-xs">ERD & schema definitions</p>
                         </TooltipContent>
                       </Tooltip>
                     );
@@ -1726,21 +1708,6 @@ GROUP BY 1 ORDER BY 1`}
                     />
                   </div>
                 )}
-
-                {activeTab.type === "visual" && (
-                  <div className="h-full flex flex-col">
-                    <VisualExplorer
-                      queryContent={resolvedQueryContent}
-                      queryId={effectiveQueryId}
-                      schemas={schemaData}
-                      dialect={detectedDialect}
-                      onEdgeSelect={setSelectedWaterfallEdge}
-                      selectedEdgeId={selectedWaterfallEdge?.id ?? null}
-                      onAnalysisComplete={setWaterfallAnalysis}
-                      updaterRef={waterfallUpdaterRef}
-                    />
-                  </div>
-                )}
               </div>
             </div>
           </ResizablePanel>
@@ -1749,42 +1716,103 @@ GROUP BY 1 ORDER BY 1`}
 
           {/* Right panel – contextual */}
           <ResizablePanel defaultSize={30} minSize={20} maxSize={45}>
-            <div className="h-full border-l border-border bg-card">
+            <div className="h-full border-l border-border bg-card flex flex-col">
               {activeTab.type === "query" && (
-                <FeedbackPanel
-                  queryId={effectiveQueryId}
-                  dialect={detectedDialect}
-                  queryContent={resolvedQueryContent}
-                  hoveredLine={hoveredEditorLine}
-                  activeLine={cursorLine}
-                  onFeedbackHover={handleFeedbackHover}
-                  onScrollToLine={handleScrollToLine}
-                  onApplySuggestion={(beforeSql, afterSql) => {
-                    const current = resolvedQueryContent;
-                    if (current.includes(beforeSql)) {
-                      setCurrentContent(current.replace(beforeSql, afterSql));
-                    }
-                  }}
-                  autoAnalyze={autoAnalyze}
-                  onAutoAnalyzed={() => setAutoAnalyze(false)}
-                />
+                <>
+                  {/* Right panel sub-tabs: Analysis | Visual */}
+                  <div className="flex border-b border-border flex-shrink-0">
+                    {([
+                      { key: "analysis" as RightPanelTab, label: "Analysis", icon: Sparkles },
+                      { key: "visual" as RightPanelTab, label: "Visual", icon: Boxes },
+                    ]).map(({ key, label, icon: Icon }) => (
+                      <button
+                        key={key}
+                        onClick={() => setRightPanelTab(key)}
+                        className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-medium border-b-2 transition-colors ${
+                          rightPanelTab === key
+                            ? "border-primary text-primary"
+                            : "border-transparent text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Sub-tab content */}
+                  <div className="flex-1 overflow-hidden">
+                    {rightPanelTab === "analysis" && (
+                      <FeedbackPanel
+                        queryId={effectiveQueryId}
+                        dialect={detectedDialect}
+                        queryContent={resolvedQueryContent}
+                        hoveredLine={hoveredEditorLine}
+                        activeLine={cursorLine}
+                        onFeedbackHover={handleFeedbackHover}
+                        onScrollToLine={handleScrollToLine}
+                        onApplySuggestion={(beforeSql, afterSql) => {
+                          const current = resolvedQueryContent;
+                          if (current.includes(beforeSql)) {
+                            setCurrentContent(current.replace(beforeSql, afterSql));
+                          }
+                        }}
+                        autoAnalyze={autoAnalyze}
+                        onAutoAnalyzed={() => setAutoAnalyze(false)}
+                      />
+                    )}
+
+                    {rightPanelTab === "visual" && (
+                      <div className="h-full flex flex-col">
+                        {selectedWaterfallEdge ? (
+                          <>
+                            {/* Visual explorer with selected edge detail */}
+                            <div className="flex-1 min-h-0 overflow-hidden">
+                              <VisualExplorer
+                                queryContent={resolvedQueryContent}
+                                queryId={effectiveQueryId}
+                                schemas={schemaData}
+                                dialect={detectedDialect}
+                                onEdgeSelect={setSelectedWaterfallEdge}
+                                selectedEdgeId={selectedWaterfallEdge?.id ?? null}
+                                onAnalysisComplete={setWaterfallAnalysis}
+                                updaterRef={waterfallUpdaterRef}
+                              />
+                            </div>
+                            {/* Edge detail at bottom */}
+                            <div className="border-t border-border max-h-[40%] overflow-auto flex-shrink-0">
+                              <WaterfallDetailPanel
+                                selectedEdge={selectedWaterfallEdge}
+                                analysis={waterfallAnalysis}
+                                onUpdateEdge={(edgeId, updates) =>
+                                  waterfallUpdaterRef.current?.updateEdge(edgeId, updates)
+                                }
+                                onDeleteEdge={(edgeId) =>
+                                  waterfallUpdaterRef.current?.deleteEdge(edgeId)
+                                }
+                              />
+                            </div>
+                          </>
+                        ) : (
+                          <VisualExplorer
+                            queryContent={resolvedQueryContent}
+                            queryId={effectiveQueryId}
+                            schemas={schemaData}
+                            dialect={detectedDialect}
+                            onEdgeSelect={setSelectedWaterfallEdge}
+                            selectedEdgeId={null}
+                            onAnalysisComplete={setWaterfallAnalysis}
+                            updaterRef={waterfallUpdaterRef}
+                          />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
 
               {activeTab.type === "schemas" && (
                 <SchemaContextPanel selection={schemaSelection} />
-              )}
-
-              {activeTab.type === "visual" && (
-                <WaterfallDetailPanel
-                  selectedEdge={selectedWaterfallEdge}
-                  analysis={waterfallAnalysis}
-                  onUpdateEdge={(edgeId, updates) =>
-                    waterfallUpdaterRef.current?.updateEdge(edgeId, updates)
-                  }
-                  onDeleteEdge={(edgeId) =>
-                    waterfallUpdaterRef.current?.deleteEdge(edgeId)
-                  }
-                />
               )}
             </div>
           </ResizablePanel>

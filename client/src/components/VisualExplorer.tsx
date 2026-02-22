@@ -14,8 +14,6 @@ import {
   Flag,
   ArrowDown,
   Loader2,
-  Play,
-  AlertCircle,
   Info,
   X,
   Pencil,
@@ -23,7 +21,7 @@ import {
   Plus,
   Check,
 } from "lucide-react";
-import { useWaterfallAnalysis, useWaterfallData, useSaveWaterfallData } from "@/hooks/use-sql-queries";
+import { useWaterfallData, useSaveWaterfallData } from "@/hooks/use-sql-queries";
 import type {
   WaterfallAnalysis,
   WaterfallNode,
@@ -788,34 +786,6 @@ function WaterfallLoadingState() {
   );
 }
 
-function WaterfallErrorState({
-  message,
-  onRetry,
-}: {
-  message: string;
-  onRetry: () => void;
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center h-full py-16 px-6 text-center">
-      <div className="rounded-full bg-destructive/10 p-4 mb-4">
-        <AlertCircle className="w-8 h-8 text-destructive/60" />
-      </div>
-      <h3 className="text-sm font-semibold text-foreground mb-1">
-        Analysis failed
-      </h3>
-      <p className="text-xs text-muted-foreground max-w-[280px] mb-3">
-        {message}
-      </p>
-      <button
-        onClick={onRetry}
-        className="text-xs text-primary hover:underline"
-      >
-        Try again
-      </button>
-    </div>
-  );
-}
-
 function MergeConflictsBanner({
   conflicts,
   newNodes,
@@ -894,7 +864,6 @@ export function VisualExplorer({
   const [containerWidth, setContainerWidth] = useState(800);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<WaterfallAnalysis | null>(null);
-  const [analyzedContent, setAnalyzedContent] = useState<string>("");
 
   // Editing state
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
@@ -906,15 +875,28 @@ export function VisualExplorer({
   const [mergeRemovedNodes, setMergeRemovedNodes] = useState<string[]>([]);
   const [showMergeBanner, setShowMergeBanner] = useState(false);
 
-  const waterfallMutation = useWaterfallAnalysis();
   const saveWaterfallMutation = useSaveWaterfallData();
 
   // Load stored waterfall data for this query
-  const { data: storedWaterfall } = useWaterfallData(queryId);
+  const { data: storedWaterfall, isLoading: isLoadingWaterfall } = useWaterfallData(queryId);
 
+  // Reset local analysis when queryId changes (different queries = different visuals)
+  const prevQueryIdRef = useRef(queryId);
   useEffect(() => {
-    if (storedWaterfall && !analysis) {
+    if (queryId !== prevQueryIdRef.current) {
+      setAnalysis(null);
+      setEditingNodeId(null);
+      setShowAddNode(false);
+      setShowMergeBanner(false);
+      prevQueryIdRef.current = queryId;
+    }
+  }, [queryId]);
+
+  // Sync stored waterfall data into local state
+  useEffect(() => {
+    if (storedWaterfall) {
       setAnalysis(storedWaterfall);
+      onAnalysisComplete?.(storedWaterfall);
     }
   }, [storedWaterfall]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1129,44 +1111,6 @@ export function VisualExplorer({
 
   // ─── Event handlers ──────────────────────────────────────────────
 
-  const handleAnalyze = useCallback(() => {
-    if (!queryContent.trim()) return;
-    setEditingNodeId(null);
-    setShowAddNode(false);
-    waterfallMutation.mutate(
-      { content: queryContent, dialect, queryId: queryId ?? undefined },
-      {
-        onSuccess: (mergeResult) => {
-          console.log(
-            "[waterfall] Analysis received:",
-            mergeResult.analysis.nodes.length, "nodes,",
-            mergeResult.analysis.edges.length, "edges,",
-            mergeResult.conflicts.length, "conflicts"
-          );
-          setAnalysis(mergeResult.analysis);
-          setAnalyzedContent(queryContent);
-          onAnalysisComplete?.(mergeResult.analysis);
-
-          if (
-            mergeResult.conflicts.length > 0 ||
-            mergeResult.newNodes.length > 0 ||
-            mergeResult.removedNodes.length > 0
-          ) {
-            setMergeConflicts(mergeResult.conflicts);
-            setMergeNewNodes(mergeResult.newNodes);
-            setMergeRemovedNodes(mergeResult.removedNodes);
-            setShowMergeBanner(true);
-          } else {
-            setShowMergeBanner(false);
-          }
-        },
-        onError: (err) => {
-          console.error("[waterfall] Analysis failed:", err);
-        },
-      }
-    );
-  }, [queryContent, dialect, queryId, waterfallMutation, onAnalysisComplete]);
-
   const handleEdgeHover = useCallback(
     (edge: WaterfallEdge | null) => {
       setHoveredEdgeId(edge?.id ?? null);
@@ -1190,8 +1134,6 @@ export function VisualExplorer({
     },
     []
   );
-
-  const isStale = analysis && analyzedContent && analyzedContent !== queryContent;
 
   // Empty state
   if (!queryContent.trim() && !analysis) {
@@ -1228,14 +1170,6 @@ export function VisualExplorer({
               </Badge>
             </>
           )}
-          {isStale && (
-            <Badge
-              variant="outline"
-              className="text-[10px] h-5 bg-amber-500/10 text-amber-600 border-amber-500/30"
-            >
-              stale
-            </Badge>
-          )}
           {analysis && (
             <button
               onClick={() => { setShowAddNode((v) => !v); setEditingNodeId(null); }}
@@ -1246,22 +1180,6 @@ export function VisualExplorer({
               Node
             </button>
           )}
-          <button
-            onClick={handleAnalyze}
-            disabled={waterfallMutation.isPending || !queryContent.trim()}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {waterfallMutation.isPending ? (
-              <Loader2 className="w-3 h-3 animate-spin" />
-            ) : (
-              <Play className="w-3 h-3" />
-            )}
-            {waterfallMutation.isPending
-              ? "Analyzing..."
-              : isStale
-                ? "Re-analyze"
-                : "Analyze Flow"}
-          </button>
         </div>
       </div>
 
@@ -1287,29 +1205,22 @@ export function VisualExplorer({
           />
         )}
 
-        {waterfallMutation.isPending && !analysis && (
+        {isLoadingWaterfall && !analysis && (
           <WaterfallLoadingState />
         )}
 
-        {waterfallMutation.isError && (
-          <WaterfallErrorState
-            message={waterfallMutation.error?.message || "Unknown error"}
-            onRetry={handleAnalyze}
-          />
-        )}
-
-        {!analysis && !waterfallMutation.isPending && !waterfallMutation.isError && (
+        {!analysis && !isLoadingWaterfall && (
           <div className="flex flex-col items-center justify-center h-full py-16 px-6 text-center">
             <div className="rounded-full bg-muted p-4 mb-4">
               <ArrowDown className="w-8 h-8 text-muted-foreground/40" />
             </div>
             <h3 className="text-sm font-semibold text-foreground mb-1">
-              Ready to analyze
+              No visual yet
             </h3>
             <p className="text-xs text-muted-foreground max-w-[280px]">
-              Click <strong>Analyze Flow</strong> to decompose your SQL into a
-              waterfall showing how data flows from source tables through
-              transformations to the final output.
+              Click <strong>Analyze</strong> on the Analysis tab to generate
+              both feedback and a waterfall showing how data flows from source
+              tables through transformations to the final output.
             </p>
           </div>
         )}
@@ -1320,11 +1231,11 @@ export function VisualExplorer({
             style={{ minHeight: Math.max(diagramHeight, 200), zIndex: 0 }}
           >
             {/* Loading overlay */}
-            {waterfallMutation.isPending && (
+            {isLoadingWaterfall && (
               <div className="absolute inset-0 bg-background/50 backdrop-blur-sm flex items-center justify-center z-30">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Re-analyzing...
+                  Loading...
                 </div>
               </div>
             )}
