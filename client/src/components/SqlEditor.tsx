@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useUpdateSqlQuery, useFormatQuery } from "@/hooks/use-sql-queries";
+import { useUpdateSqlQuery } from "@/hooks/use-sql-queries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Wand2, Save, Loader2, Pencil, Check, AlertTriangle, Minus, Plus, Highlighter } from "lucide-react";
+import { Save, Loader2, Pencil, Check, AlertTriangle, Minus, Plus, Highlighter } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { SqlQuery } from "@shared/schema";
 
@@ -65,7 +65,6 @@ interface SqlEditorProps {
   onContentChange: (content: string) => void;
   maxChars: number;
   modelName: string;
-  dialect?: string;
   highlightedLines?: Set<number>;
   onLineHover?: (lineNumber: number | null) => void;
   onCursorLineChange?: (lineNumber: number | null) => void;
@@ -88,7 +87,7 @@ function getStoredFontSize(): number {
   return DEFAULT_FONT_SIZE;
 }
 
-export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect, highlightedLines, onLineHover, onCursorLineChange, scrollToLine }: SqlEditorProps) {
+export function SqlEditor({ query, onContentChange, maxChars, modelName, highlightedLines, onLineHover, onCursorLineChange, scrollToLine }: SqlEditorProps) {
   // The editor always works with the latest version: draft if available, otherwise saved content
   const [content, setContent] = useState(query.draftContent ?? query.content);
   const [title, setTitle] = useState(query.title);
@@ -104,7 +103,6 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   const updateMutation = useUpdateSqlQuery();
-  const formatMutation = useFormatQuery();
   const { toast } = useToast();
   const draftTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -203,24 +201,6 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
         },
       }
     );
-  };
-
-  const handleFormat = () => {
-    formatMutation.mutate({ sql: content, dialect }, {
-      onSuccess: (result) => {
-        setContent(result.formatted);
-        onContentChange(result.formatted);
-        // Format is an intentional action — save immediately like manual save
-        updateMutation.mutate({ id: query.id, data: { content: result.formatted, formattedContent: result.formatted, draftContent: null } });
-        const desc = result.llm
-          ? "Query formatted using LLM (ISO/IEC 9075 standards)."
-          : "Query formatted using local formatter.";
-        toast({ title: "Formatted", description: result.notes || desc });
-      },
-      onError: (error) => {
-        toast({ title: "Error", description: error.message, variant: "destructive" });
-      },
-    });
   };
 
   const handleTitleSave = () => {
@@ -350,6 +330,57 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
           )}
         </div>
         <div className="flex items-center gap-1">
+          <span className="text-[10px] font-mono text-muted-foreground">
+            {lineCount} {lineCount === 1 ? "ln" : "lns"}
+          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                isOverLimit
+                  ? "bg-red-500/15 text-red-500"
+                  : isNearLimit
+                    ? "bg-amber-500/15 text-amber-500"
+                    : "text-muted-foreground"
+              }`}>
+                {isOverLimit && <AlertTriangle className="w-2.5 h-2.5" />}
+                <span>{formatCharCount(charCount)}</span>
+                <span className="opacity-40">/</span>
+                <span>{formatCharCount(maxChars)}</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p className="text-xs">
+                {charCount.toLocaleString()} / {maxChars.toLocaleString()} chars
+                {isOverLimit
+                  ? ` — over limit for ${modelName}`
+                  : ` — max for ${modelName}`}
+              </p>
+            </TooltipContent>
+          </Tooltip>
+          <div className="w-px h-3.5 bg-border mx-0.5" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className={`p-1 rounded hover:bg-accent disabled:opacity-30 disabled:pointer-events-none transition-colors ${
+                  hasDraft
+                    ? "text-amber-500 hover:text-amber-400"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {isSaving ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p className="text-xs">{hasDraft ? "Save query (unsaved changes)" : "Save query"}</p>
+            </TooltipContent>
+          </Tooltip>
+          <div className="w-px h-3.5 bg-border mx-0.5" />
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -430,76 +461,6 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
 
           {/* Code area with syntax highlighting overlay */}
           <div className="flex-1 relative overflow-hidden">
-            {/* Floating toolbar overlay – bottom-right inside editor */}
-            <div className="absolute bottom-2 right-3 flex items-center gap-1.5 bg-card/90 backdrop-blur-sm border border-border rounded-md px-2 py-1 shadow-sm" style={{ zIndex: 10 }}>
-              <span className="text-[10px] font-mono text-muted-foreground">
-                {lineCount} {lineCount === 1 ? "ln" : "lns"}
-              </span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono ${
-                    isOverLimit
-                      ? "bg-red-500/15 text-red-500"
-                      : isNearLimit
-                        ? "bg-amber-500/15 text-amber-500"
-                        : "text-muted-foreground"
-                  }`}>
-                    {isOverLimit && <AlertTriangle className="w-2.5 h-2.5" />}
-                    <span>{formatCharCount(charCount)}</span>
-                    <span className="opacity-40">/</span>
-                    <span>{formatCharCount(maxChars)}</span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <p className="text-xs">
-                    {charCount.toLocaleString()} / {maxChars.toLocaleString()} chars
-                    {isOverLimit
-                      ? ` — over limit for ${modelName}`
-                      : ` — max for ${modelName}`}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-              <div className="w-px h-3.5 bg-border mx-0.5" />
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={handleFormat}
-                    disabled={formatMutation.isPending || !content.trim()}
-                    className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:pointer-events-none transition-colors"
-                  >
-                    {formatMutation.isPending ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Wand2 className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom"><p className="text-xs">Format SQL</p></TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={handleSave}
-                    disabled={isSaving}
-                    className={`p-1 rounded hover:bg-accent disabled:opacity-30 disabled:pointer-events-none transition-colors ${
-                      hasDraft
-                        ? "text-amber-500 hover:text-amber-400"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {isSaving ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Save className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <p className="text-xs">{hasDraft ? "Save query (unsaved changes)" : "Save query"}</p>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-
             {/* Line highlight layer (behind syntax, behind textarea) */}
             <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 0 }}>
               <div className="py-3 font-mono" style={{ fontSize: `${fontSize}px`, lineHeight: `${lineHeight}px` }}>
