@@ -483,6 +483,23 @@ export function useDeleteSchemaVoiceContext() {
   });
 }
 
+export function useVoiceToQuery() {
+  return useMutation<{ title: string; content: string }, Error, { transcript: string; dialect?: string }>({
+    mutationFn: async (data) => {
+      const res = await fetch("/api/voice-to-query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Failed to generate query" }));
+        throw new Error(err.message);
+      }
+      return res.json();
+    },
+  });
+}
+
 export function useTranscribeAudio() {
   return useMutation<{ transcript: string }, Error, { schemaId: number; audio: string }>({
     mutationFn: async ({ schemaId, audio }) => {
