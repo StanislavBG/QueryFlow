@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef, type DragEvent, type ChangeEvent } from "react";
 import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas } from "@/hooks/use-sql-queries";
 import { QueryDocumentList } from "@/components/QueryDocumentList";
 import { SqlEditor } from "@/components/SqlEditor";
@@ -17,9 +17,10 @@ import {
 } from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield } from "lucide-react";
+import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+import { useToast } from "@/hooks/use-toast";
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
 import { useCurrentUser } from "@/hooks/use-admin";
 import { useLocation } from "wouter";
@@ -84,6 +85,96 @@ function useTheme() {
   }, []);
 
   return { dark, toggle };
+}
+
+// ---------------------------------------------------------------------------
+// QueryFileUploadEmpty — empty-state widget with file upload for queries
+// ---------------------------------------------------------------------------
+
+function QueryFileUploadEmpty({ onCreated }: { onCreated: (id: number) => void }) {
+  const createMutation = useCreateSqlQuery();
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const processFile = useCallback(
+    async (file: File) => {
+      const content = await file.text();
+      const title = file.name.replace(/\.[^.]+$/, "") || "Uploaded Query";
+
+      createMutation.mutate(
+        { title, content },
+        {
+          onSuccess: (query) => {
+            onCreated(query.id);
+            toast({ title: "Query created", description: `"${title}" loaded from file.` });
+          },
+          onError: (err) => {
+            toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+          },
+        }
+      );
+    },
+    [createMutation, onCreated, toast]
+  );
+
+  const handleDrop = useCallback(
+    (e: DragEvent) => {
+      e.preventDefault();
+      setIsDragOver(false);
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) processFile(files[0]);
+    },
+    [processFile]
+  );
+
+  const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) processFile(files[0]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-4 px-8">
+      <FileCode2 className="w-10 h-10 opacity-30" />
+      <div className="text-center">
+        <p className="text-sm font-medium">No query selected</p>
+        <p className="text-xs opacity-60 max-w-[240px] mx-auto mt-1">
+          Create a new query from the sidebar, or upload a SQL file to get started.
+        </p>
+      </div>
+
+      <div
+        onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+        onDragLeave={() => setIsDragOver(false)}
+        onDrop={handleDrop}
+        onClick={() => fileInputRef.current?.click()}
+        className={`w-full max-w-xs border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+          isDragOver
+            ? "border-primary bg-primary/5"
+            : "border-border hover:border-primary/50"
+        }`}
+      >
+        {createMutation.isPending ? (
+          <Loader2 className="w-6 h-6 mx-auto mb-2 animate-spin text-muted-foreground" />
+        ) : (
+          <Upload className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+        )}
+        <p className="text-xs text-muted-foreground">
+          {createMutation.isPending ? "Creating query..." : "Drop a file or click to upload"}
+        </p>
+        <p className="text-[10px] text-muted-foreground/60 mt-1">.sql, .txt, or any text file</p>
+      </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".sql,.txt,.hql,.ddl"
+        onChange={handleFileSelect}
+        className="hidden"
+      />
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -520,13 +611,9 @@ export default function Editor() {
                         onCursorLineChange={handleCursorLineChange}
                       />
                     ) : (
-                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
-                        <FileCode2 className="w-10 h-10 opacity-30" />
-                        <p className="text-sm font-medium">No query selected</p>
-                        <p className="text-xs opacity-60 max-w-[240px] text-center">
-                          Create a new query from the sidebar or select an existing one to get started.
-                        </p>
-                      </div>
+                      <QueryFileUploadEmpty
+                        onCreated={(id) => handleQuerySelect(id)}
+                      />
                     )}
                   </>
                 )}
