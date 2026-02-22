@@ -196,9 +196,13 @@ export async function llmAnalyzeQuery(
     ? `\nThe user has prioritized the following analysis areas (emphasize these in your output, but still report critical findings in other areas):\n${enabledCategories.map(c => `- ${c}`).join("\n")}`
     : "";
 
+  // Scale max_tokens based on input size: short queries get 16k, large procedures/batches get 32k
+  const sqlLineCount = sql.split("\n").length;
+  const maxTokens = sqlLineCount >= 100 ? 32768 : 16384;
+
   const response = await openai.chat.completions.create({
     model: MODEL,
-    max_tokens: 16384,
+    max_tokens: maxTokens,
     messages: [
       {
         role: "user",
