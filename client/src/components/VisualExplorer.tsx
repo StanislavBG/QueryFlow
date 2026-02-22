@@ -560,9 +560,13 @@ export function VisualExplorer({
       { content: queryContent, dialect },
       {
         onSuccess: (data) => {
+          console.log("[waterfall] Analysis received:", data.nodes.length, "nodes,", data.edges.length, "edges");
           setAnalysis(data);
           setAnalyzedContent(queryContent);
           onAnalysisComplete?.(data);
+        },
+        onError: (err) => {
+          console.error("[waterfall] Analysis failed:", err);
         },
       }
     );
@@ -643,12 +647,12 @@ export function VisualExplorer({
       </div>
 
       {/* Content area */}
-      <div ref={containerRef} className="flex-1 relative overflow-auto">
+      <div ref={containerRef} className="flex-1 relative overflow-auto min-h-0">
         {waterfallMutation.isPending && !analysis && (
           <WaterfallLoadingState />
         )}
 
-        {waterfallMutation.isError && !analysis && (
+        {waterfallMutation.isError && (
           <WaterfallErrorState
             message={waterfallMutation.error?.message || "Unknown error"}
             onRetry={handleAnalyze}
@@ -673,8 +677,8 @@ export function VisualExplorer({
 
         {analysis && (
           <div
-            className="relative"
-            style={{ minHeight: diagramHeight, zIndex: 0 }}
+            className="relative p-4"
+            style={{ minHeight: Math.max(diagramHeight, 200), zIndex: 0 }}
           >
             {/* Loading overlay for re-analysis */}
             {waterfallMutation.isPending && (
