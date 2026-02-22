@@ -86,6 +86,21 @@ export const insertFeedbackSchema = createInsertSchema(queryFeedback).omit({ id:
 export type QueryFeedbackRow = typeof queryFeedback.$inferSelect;
 export type InsertFeedback = z.infer<typeof insertFeedbackSchema>;
 
+// Formatting Rules table
+export const formattingRules = pgTable("formatting_rules", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  enabled: boolean("enabled").notNull().default(true),
+  value: text("value").notNull().default(""),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertFormattingRuleSchema = createInsertSchema(formattingRules).omit({ id: true, updatedAt: true });
+
+export type FormattingRule = typeof formattingRules.$inferSelect;
+export type InsertFormattingRule = z.infer<typeof insertFormattingRuleSchema>;
+
 // Agent Settings table
 export const agentSettings = pgTable("agent_settings", {
   id: serial("id").primaryKey(),
