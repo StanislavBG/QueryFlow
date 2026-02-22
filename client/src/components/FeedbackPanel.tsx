@@ -85,21 +85,21 @@ function getAgentConfig(agentType: string): { icon: typeof Search; label: string
   return { icon: Tag, label };
 }
 
-/** Render a before/after SQL diff comparison. */
+/** Render a side-by-side before/after SQL comparison. */
 function SqlBeforeAfter({ before, after }: { before: string; after: string }) {
   return (
-    <div className="ml-6.5 space-y-1.5">
-      <div className="rounded-md border border-destructive/20 bg-destructive/5 p-2 overflow-x-auto">
+    <div className="ml-6.5 grid grid-cols-2 gap-1.5">
+      <div className="rounded-md border border-destructive/20 bg-destructive/5 p-2 overflow-x-auto min-w-0">
         <div className="flex items-center gap-1 mb-1">
           <span className="text-[9px] font-semibold text-destructive uppercase tracking-wide">Before</span>
         </div>
-        <pre className="text-[11px] leading-relaxed text-foreground/70 whitespace-pre-wrap font-mono">{before}</pre>
+        <pre className="text-[11px] leading-relaxed text-foreground/70 whitespace-pre-wrap font-mono break-words">{before}</pre>
       </div>
-      <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 p-2 overflow-x-auto">
+      <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 p-2 overflow-x-auto min-w-0">
         <div className="flex items-center gap-1 mb-1">
           <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">After</span>
         </div>
-        <pre className="text-[11px] leading-relaxed text-foreground/70 whitespace-pre-wrap font-mono">{after}</pre>
+        <pre className="text-[11px] leading-relaxed text-foreground/70 whitespace-pre-wrap font-mono break-words">{after}</pre>
       </div>
     </div>
   );
@@ -112,6 +112,7 @@ function FeedbackCard({
   isActiveLineMatch,
   onHover,
   onApplySuggestion,
+  onScrollToLine,
 }: {
   feedback: QueryFeedbackRow;
   queryId: number;
@@ -119,6 +120,7 @@ function FeedbackCard({
   isActiveLineMatch?: boolean;
   onHover?: (feedbackId: number | null) => void;
   onApplySuggestion?: (beforeSql: string, afterSql: string) => void;
+  onScrollToLine?: (line: number) => void;
 }) {
   const [expanded, setExpanded] = useState(!feedback.isResolved);
   const resolveMutation = useResolveFeedback();
@@ -180,13 +182,20 @@ function FeedbackCard({
               {agent.label}
             </Badge>
             {feedback.lineNumber && (
-              <span className={`text-[10px] ${
-                isHighlighted || isActiveLineMatch
-                  ? "text-primary font-semibold"
-                  : "text-muted-foreground"
-              }`}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onScrollToLine?.(feedback.lineNumber!);
+                }}
+                className={`text-[10px] hover:underline cursor-pointer ${
+                  isHighlighted || isActiveLineMatch
+                    ? "text-primary font-semibold"
+                    : "text-muted-foreground hover:text-primary"
+                }`}
+                title="Click to scroll editor to this line"
+              >
                 Line {feedback.lineNumber}
-              </span>
+              </button>
             )}
           </div>
         </div>
@@ -198,23 +207,24 @@ function FeedbackCard({
       </button>
 
       {expanded && (
-        <div className="px-3 pb-3 space-y-2">
-          <p className="text-xs text-muted-foreground leading-relaxed pl-6.5">
+        <div className="px-3 pb-3 space-y-3">
+          {/* Analysis message — primary content */}
+          <div className="pl-6.5 text-[13px] text-foreground/85 leading-[1.65] whitespace-pre-wrap">
             {feedback.message}
-          </p>
-
-          {/* Before/After SQL comparison */}
-          {hasBeforeAfter && (
-            <SqlBeforeAfter before={beforeSql!} after={afterSql!} />
-          )}
+          </div>
 
           {/* Text suggestion (shown when no before/after available) */}
           {feedback.suggestion && !hasBeforeAfter && (
-            <div className="ml-6.5 p-2 rounded-md bg-muted/50 border border-border">
+            <div className="ml-6.5 p-2.5 rounded-md bg-muted/50 border border-border">
               <p className="text-xs text-foreground/80 leading-relaxed">
                 <span className="font-medium text-primary">Suggestion:</span> {feedback.suggestion}
               </p>
             </div>
+          )}
+
+          {/* Before/After SQL comparison — side-by-side */}
+          {hasBeforeAfter && (
+            <SqlBeforeAfter before={beforeSql!} after={afterSql!} />
           )}
 
           {/* Action buttons */}
@@ -350,9 +360,10 @@ interface FeedbackPanelProps {
   activeLine?: number | null;
   onFeedbackHover?: (lineNumbers: Set<number>) => void;
   onApplySuggestion?: (beforeSql: string, afterSql: string) => void;
+  onScrollToLine?: (line: number) => void;
 }
 
-export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, activeLine, onFeedbackHover, onApplySuggestion }: FeedbackPanelProps) {
+export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, activeLine, onFeedbackHover, onApplySuggestion, onScrollToLine }: FeedbackPanelProps) {
   const { data: feedback, isLoading: isFeedbackLoading } = useQueryFeedback(queryId);
   const { progress: analysisProgress, ...analyzeMutation } = useAnalyzeQuery();
   const [filter, setFilter] = useState<string | null>(null);
@@ -533,6 +544,7 @@ export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, act
                   isActiveLineMatch={activeLineFeedbackIds.has(item.id)}
                   onHover={handleFeedbackHover}
                   onApplySuggestion={onApplySuggestion}
+                  onScrollToLine={onScrollToLine}
                 />
               ))
           )}
