@@ -117,6 +117,9 @@ export default function Editor() {
   const [hoveredEditorLine, setHoveredEditorLine] = useState<number | null>(null);
   const [cursorLine, setCursorLine] = useState<number | null>(null);
   const [feedbackHighlightedLines, setFeedbackHighlightedLines] = useState<Set<number>>(new Set());
+  // Scroll-to-line: incremented counter + target line to trigger scroll
+  const [scrollToLine, setScrollToLine] = useState<number | null>(null);
+  const scrollToLineCounter = useRef(0);
 
   // Detect dialect from current editor content
   const detectedDialect: SqlDialect = useMemo(
@@ -181,6 +184,12 @@ export default function Editor() {
 
   const handleFeedbackHover = useCallback((lineNumbers: Set<number>) => {
     setFeedbackHighlightedLines(lineNumbers);
+  }, []);
+
+  const handleScrollToLine = useCallback((line: number) => {
+    // Use a unique counter-based value so repeated clicks on the same line still trigger
+    scrollToLineCounter.current += 1;
+    setScrollToLine(line + scrollToLineCounter.current * 0.001);
   }, []);
 
   const editorHighlightedLines = useMemo(() => {
@@ -518,6 +527,7 @@ export default function Editor() {
                         highlightedLines={editorHighlightedLines}
                         onLineHover={handleEditorLineHover}
                         onCursorLineChange={handleCursorLineChange}
+                        scrollToLine={scrollToLine}
                       />
                     ) : (
                       <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
@@ -565,6 +575,7 @@ export default function Editor() {
                   hoveredLine={hoveredEditorLine}
                   activeLine={cursorLine}
                   onFeedbackHover={handleFeedbackHover}
+                  onScrollToLine={handleScrollToLine}
                   onApplySuggestion={(beforeSql, afterSql) => {
                     const current = resolvedQueryContent;
                     if (current.includes(beforeSql)) {

@@ -69,6 +69,7 @@ interface SqlEditorProps {
   highlightedLines?: Set<number>;
   onLineHover?: (lineNumber: number | null) => void;
   onCursorLineChange?: (lineNumber: number | null) => void;
+  scrollToLine?: number | null;
 }
 
 const FONT_SIZE_STEPS = [12, 13, 14, 15, 16, 18, 20];
@@ -87,7 +88,7 @@ function getStoredFontSize(): number {
   return DEFAULT_FONT_SIZE;
 }
 
-export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect, highlightedLines, onLineHover, onCursorLineChange }: SqlEditorProps) {
+export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect, highlightedLines, onLineHover, onCursorLineChange, scrollToLine }: SqlEditorProps) {
   // The editor always works with the latest version: draft if available, otherwise saved content
   const [content, setContent] = useState(query.draftContent ?? query.content);
   const [title, setTitle] = useState(query.title);
@@ -228,6 +229,27 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, dialect
   };
 
   const lineHeight = Math.round(fontSize * 1.857);
+
+  // Scroll-to-line: when triggered, scroll the editor so the target line
+  // sits at approximately the top 25% of the visible area.
+  const scrollToLineRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (scrollToLine == null || scrollToLine === scrollToLineRef.current) return;
+    scrollToLineRef.current = scrollToLine;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const actualLine = Math.round(scrollToLine);
+    const viewportHeight = textarea.clientHeight;
+    const padding = 12; // py-3
+    const targetOffset = padding + (actualLine - 1) * lineHeight;
+    // Position at top 25% of visible area so analyst can read context before and after
+    const scrollTarget = targetOffset - viewportHeight * 0.25;
+    textarea.scrollTop = Math.max(0, scrollTarget);
+    // Also sync highlight overlay
+    if (highlightRef.current) {
+      highlightRef.current.scrollTop = textarea.scrollTop;
+    }
+  }, [scrollToLine, lineHeight]);
 
   const changeFontSize = useCallback((direction: 1 | -1) => {
     setFontSize((prev) => {
