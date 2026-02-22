@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Play, Sparkles, AlertCircle, Mic, Key, Columns3 } from "lucide-react";
+import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Play, Sparkles, AlertCircle, Mic, Key, Columns3, Lock, ExternalLink, Scale } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -312,6 +312,270 @@ function makeDemoQuery(result: DemoBootstrapResult): SqlQuery {
 }
 
 // ---------------------------------------------------------------------------
+// Terms of Service modal
+// ---------------------------------------------------------------------------
+
+function TermsOfServiceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = dialogRef.current;
+    if (el) el.focus();
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { onClose(); return; }
+      if (e.key !== "Tab" || !el) return;
+      const focusable = el.querySelectorAll<HTMLElement>('button, a[href], [tabindex]:not([tabindex="-1"])');
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tos-title"
+        tabIndex={-1}
+        className="bg-card border border-border rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[80vh] overflow-auto outline-none"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Scale className="w-5 h-5 text-primary" />
+            <h2 id="tos-title" className="text-lg font-bold">Terms of Service</h2>
+          </div>
+          <p className="text-xs text-muted-foreground">Last updated: February 2026</p>
+
+          <div className="space-y-3 text-sm text-muted-foreground leading-relaxed">
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">1. Acceptance of Terms</h3>
+              <p>
+                By accessing or using QueryFlow, you agree to be bound by these Terms of Service. If you
+                do not agree, do not use the service. QueryFlow is an AI-powered SQL query analysis tool
+                that provides automated feedback on your SQL queries.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">2. Service Description</h3>
+              <p>
+                QueryFlow provides SQL query analysis, formatting, voice-to-SQL generation, schema
+                management, and visual query exploration. All intelligent features are powered by
+                third-party AI services (OpenAI). Query content you submit is transmitted to OpenAI
+                for processing and analysis.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">3. User Responsibilities</h3>
+              <p>
+                You are solely responsible for the SQL queries, schema definitions, and data you submit.
+                Do not submit queries containing production credentials, personally identifiable
+                information (PII), or data subject to regulatory restrictions (HIPAA, GDPR, PCI-DSS, etc.)
+                unless you have confirmed compliance with your organization's data policies. You must not
+                use QueryFlow to generate malicious SQL or for any unlawful purpose.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1 flex items-center gap-1.5">
+                <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
+                4. Third-Party AI Processing
+              </h3>
+              <p>
+                QueryFlow transmits your queries, schemas, and context to OpenAI's API. By using
+                QueryFlow, you acknowledge and consent to this data transmission. OpenAI's{" "}
+                <a href="https://openai.com/policies/api-data-usage-policies" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  API data usage policies
+                </a>{" "}
+                govern how they handle data received via their API.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1 flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-emerald-500" />
+                5. Data Storage &amp; Security
+              </h3>
+              <p>
+                Data stored in QueryFlow is encrypted at rest using AES-256 encryption. You may delete
+                your queries, schemas, and context at any time — deletion is permanent and immediate from
+                our database. Data previously sent to OpenAI is subject to OpenAI's retention policies.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">6. Intellectual Property</h3>
+              <p>
+                You retain all ownership rights to the SQL queries, schemas, and content you submit.
+                QueryFlow does not claim ownership of your content. AI-generated suggestions (formatting,
+                analysis feedback, voice-to-SQL output) are provided for your use without restriction.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">7. Disclaimer of Warranties</h3>
+              <p>
+                QueryFlow is provided "as is" without warranties of any kind. AI-generated analysis and
+                suggestions may contain errors. You are responsible for reviewing and validating all
+                AI-generated output before using it in production systems. QueryFlow does not guarantee
+                the accuracy, completeness, or reliability of any analysis.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">8. Limitation of Liability</h3>
+              <p>
+                QueryFlow and its operators shall not be liable for any indirect, incidental, or
+                consequential damages arising from your use of the service, including but not limited
+                to data loss, query errors, or downstream effects of applying AI-generated suggestions.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">9. Modifications</h3>
+              <p>
+                We may update these Terms at any time. Continued use of QueryFlow after changes
+                constitutes acceptance of the revised Terms. Material changes will be indicated by
+                updating the "Last updated" date above.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="w-full mt-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Data Handling & Privacy modal
+// ---------------------------------------------------------------------------
+
+function DataPolicyModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = dialogRef.current;
+    if (el) el.focus();
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { onClose(); return; }
+      if (e.key !== "Tab" || !el) return;
+      const focusable = el.querySelectorAll<HTMLElement>('button, a[href], [tabindex]:not([tabindex="-1"])');
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="data-policy-title"
+        tabIndex={-1}
+        className="bg-card border border-border rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[80vh] overflow-auto outline-none"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Shield className="w-5 h-5 text-primary" />
+            <h2 id="data-policy-title" className="text-lg font-bold">How We Handle Your Data</h2>
+          </div>
+
+          <div className="space-y-3 text-sm text-muted-foreground leading-relaxed">
+            <div>
+              <h3 className="text-foreground font-semibold mb-1 flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-emerald-500" />
+                Encryption at Rest
+              </h3>
+              <p>
+                All data stored in QueryFlow — including your SQL queries, schemas, voice context, and
+                analysis feedback — is encrypted at rest using AES-256 encryption via the database
+                provider's built-in encryption layer. Backups are also encrypted. Your data is never
+                stored in plaintext on disk.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1 flex items-center gap-1.5">
+                <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
+                AI Processing via OpenAI
+              </h3>
+              <p>
+                QueryFlow sends your SQL queries, schema definitions, and associated context to
+                OpenAI's API for analysis, formatting, and query generation. This means your SQL
+                content is transmitted to and processed by OpenAI's servers. By using QueryFlow's
+                AI features, you acknowledge and consent to this data transmission.
+              </p>
+              <p className="mt-1.5">
+                OpenAI's data usage policy applies to content sent through their API. We recommend
+                reviewing{" "}
+                <a href="https://openai.com/policies/api-data-usage-policies" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  OpenAI's API data usage policies
+                </a>{" "}
+                to understand how they handle data received via their API.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">Your Responsibility</h3>
+              <p>
+                You are responsible for determining whether your SQL queries and schema data are
+                appropriate to process through third-party AI services. Do not submit queries
+                containing sensitive credentials, personally identifiable information (PII), or
+                data subject to regulatory restrictions (HIPAA, GDPR, etc.) unless you have
+                confirmed compliance with your organization's data policies.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="text-foreground font-semibold mb-1">Data Retention</h3>
+              <p>
+                Your queries and schemas are stored only in your QueryFlow account database.
+                You can delete any query, schema, or context at any time. Deletion is permanent
+                and immediate from our database. Data previously sent to OpenAI for processing
+                is subject to OpenAI's retention policies.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="w-full mt-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+          >
+            I Understand
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Editor page
 // ---------------------------------------------------------------------------
 
@@ -342,6 +606,10 @@ export default function Editor() {
   const [demoQuery, setDemoQuery] = useState<SqlQuery | null>(null);
   const isDemoActive = demoQuery !== null;
   const showOnboarding = !isSignedIn && !isDemoActive;
+
+  // --- landing page modals ---
+  const [showTos, setShowTos] = useState(false);
+  const [showDataPolicy, setShowDataPolicy] = useState(false);
 
   // When user signs in, drop any demo query/schema from local state
   const prevSignedIn = useRef(isSignedIn);
@@ -623,58 +891,60 @@ export default function Editor() {
       {/* Main content */}
       <div className="flex-1 overflow-hidden">
         {showOnboarding ? (
-          /* ── Full-width landing page for unauthenticated users ── */
-          <div className="h-full overflow-auto bg-background">
-            <div className="max-w-5xl mx-auto px-8 py-16 space-y-14">
-              {/* Hero */}
-              <div className="text-center space-y-6">
-                <div className="inline-flex p-4 rounded-2xl bg-gradient-to-br from-primary/10 to-purple-600/10 border border-primary/10">
-                  <FileCode2 className="w-14 h-14 text-primary" />
+          /* ── Full-viewport landing page for unauthenticated users — no scroll ── */
+          <div className="h-full flex flex-col bg-background overflow-hidden">
+            {/* Main content — fills available space, centered */}
+            <div className="flex-1 flex flex-col items-center justify-center px-6 min-h-0">
+              <div className="max-w-5xl w-full space-y-6">
+                {/* Hero */}
+                <div className="text-center space-y-4">
+                  <div className="inline-flex p-3 rounded-2xl bg-gradient-to-br from-primary/10 to-purple-600/10 border border-primary/10">
+                    <FileCode2 className="w-10 h-10 text-primary" />
+                  </div>
+
+                  <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">
+                    Your SQL Query Analyzer
+                  </h1>
+
+                  <p className="text-sm md:text-base text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+                    QueryFlow challenges you to write better SQL. Multi-agent AI analysis catches bugs,
+                    performance issues, and security risks — you stay in complete control of every decision.
+                  </p>
+
+                  <Button
+                    onClick={handleDemoBootstrap}
+                    disabled={demoMutation.isPending}
+                    className="h-10 px-8 text-sm gap-2 rounded-full shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5 transition-all duration-300 bg-gradient-to-r from-primary to-purple-600 text-primary-foreground font-semibold"
+                  >
+                    {demoMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Generating flawed query...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4" />
+                        Try It — Find 9 Mistakes in a Real Query
+                      </>
+                    )}
+                  </Button>
+
+                  {demoMutation.isPending && (
+                    <p className="text-xs text-muted-foreground/60">
+                      Loading e-commerce schema &amp; analytics query with intentional mistakes...
+                    </p>
+                  )}
                 </div>
 
-                <h1 className="text-3xl md:text-4xl font-bold text-foreground tracking-tight">
-                  Your SQL Query Analyzer
-                </h1>
-
-                <p className="text-base md:text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-                  QueryFlow challenges you to write better SQL. Multi-agent AI analysis catches bugs,
-                  performance issues, and security risks — you stay in complete control of every decision.
-                </p>
-
-                <Button
-                  onClick={handleDemoBootstrap}
-                  disabled={demoMutation.isPending}
-                  className="h-12 px-10 text-base gap-2.5 rounded-full shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5 transition-all duration-300 bg-gradient-to-r from-primary to-purple-600 text-primary-foreground font-semibold"
-                >
-                  {demoMutation.isPending ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      Generating flawed query...
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-5 h-5" />
-                      Try It — Find 9 Mistakes in a Real Query
-                    </>
-                  )}
-                </Button>
-
-                {demoMutation.isPending && (
-                  <p className="text-xs text-muted-foreground/60">
-                    Loading e-commerce schema &amp; analytics query with intentional mistakes...
-                  </p>
-                )}
-              </div>
-
-              {/* Before / After showcase */}
-              <div className="grid md:grid-cols-2 gap-4 max-w-4xl mx-auto">
-                <div className="rounded-lg border border-destructive/20 bg-card overflow-hidden">
-                  <div className="px-4 py-2 bg-destructive/10 border-b border-destructive/20">
-                    <p className="text-xs font-semibold text-destructive flex items-center gap-1.5">
-                      <AlertCircle className="w-3.5 h-3.5" /> Before — Common Mistakes
-                    </p>
-                  </div>
-                  <pre className="p-4 text-[11px] font-mono text-muted-foreground leading-relaxed overflow-x-auto whitespace-pre">
+                {/* Before / After showcase */}
+                <div className="grid md:grid-cols-2 gap-3 max-w-4xl mx-auto">
+                  <div className="rounded-lg border border-destructive/20 bg-card overflow-hidden">
+                    <div className="px-3 py-1.5 bg-destructive/10 border-b border-destructive/20">
+                      <p className="text-xs font-semibold text-destructive flex items-center gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5" /> Before — Common Mistakes
+                      </p>
+                    </div>
+                    <pre className="p-3 text-[11px] font-mono text-muted-foreground leading-relaxed overflow-x-auto whitespace-pre">
 {`SELECT *
 FROM orders
 LEFT JOIN order_items
@@ -683,16 +953,16 @@ LEFT JOIN order_items
 -- LEFT JOIN inflates revenue with returns
 -- SELECT * pulls unnecessary columns
 GROUP BY DATE_TRUNC('month', order_date)`}
-                  </pre>
-                </div>
-
-                <div className="rounded-lg border border-emerald-500/20 bg-card overflow-hidden">
-                  <div className="px-4 py-2 bg-emerald-500/10 border-b border-emerald-500/20">
-                    <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5" /> After — With QueryFlow Fixes
-                    </p>
+                    </pre>
                   </div>
-                  <pre className="p-4 text-[11px] font-mono text-muted-foreground leading-relaxed overflow-x-auto whitespace-pre">
+
+                  <div className="rounded-lg border border-emerald-500/20 bg-card overflow-hidden">
+                    <div className="px-3 py-1.5 bg-emerald-500/10 border-b border-emerald-500/20">
+                      <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5" /> After — With QueryFlow Fixes
+                      </p>
+                    </div>
+                    <pre className="p-3 text-[11px] font-mono text-muted-foreground leading-relaxed overflow-x-auto whitespace-pre">
 {`SELECT
   DATE_TRUNC('month', o.order_date) AS month,
   SUM(oi.amount) AS revenue
@@ -703,45 +973,71 @@ WHERE o.status NOT IN ('refunded','cancelled')
   AND o.order_date >= CURRENT_DATE
       - INTERVAL '12 months'
 GROUP BY 1 ORDER BY 1`}
-                  </pre>
+                    </pre>
+                  </div>
+                </div>
+
+                {/* Feature highlights */}
+                <div className="grid md:grid-cols-3 gap-4 max-w-4xl mx-auto">
+                  {([
+                    {
+                      icon: Database,
+                      title: "Schema Context",
+                      desc: "Add voice or text annotations at the schema, table, or column level so AI analysis deeply understands your data model.",
+                      color: "text-cyan-500",
+                    },
+                    {
+                      icon: Sparkles,
+                      title: "AI Analysis",
+                      desc: "Multi-agent analyzer that challenges you to improve every query. Catch bugs, performance issues, and security risks.",
+                      color: "text-primary",
+                    },
+                    {
+                      icon: Boxes,
+                      title: "Visual Explorer",
+                      desc: "Visualize stored procedures and queries. Complete lineage tracking with a dynamic visual query editor.",
+                      color: "text-emerald-500",
+                    },
+                  ] as const).map((feat) => {
+                    const Icon = feat.icon;
+                    return (
+                      <div key={feat.title} className="p-4 rounded-xl border border-border bg-card/50 space-y-2">
+                        <div className="p-2 rounded-lg bg-accent/50 w-fit">
+                          <Icon className={`w-4 h-4 ${feat.color}`} />
+                        </div>
+                        <h3 className="text-xs font-semibold text-foreground">{feat.title}</h3>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">{feat.desc}</p>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-
-              {/* Feature highlights */}
-              <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
-                {([
-                  {
-                    icon: Database,
-                    title: "Schema Context",
-                    desc: "Enrich your schema with domain knowledge. Add voice or text annotations at the schema, table, or column level so AI analysis deeply understands your data model.",
-                    color: "text-cyan-500",
-                  },
-                  {
-                    icon: Sparkles,
-                    title: "AI Analysis",
-                    desc: "Multi-agent analyzer that challenges you to improve every query. Catch bugs, performance issues, and security risks — with complete control over your decisions.",
-                    color: "text-primary",
-                  },
-                  {
-                    icon: Boxes,
-                    title: "Visual Explorer",
-                    desc: "Visualize stored procedures and queries like never before. Complete lineage tracking with a dynamic visual query editor.",
-                    color: "text-emerald-500",
-                  },
-                ] as const).map((feat) => {
-                  const Icon = feat.icon;
-                  return (
-                    <div key={feat.title} className="p-5 rounded-xl border border-border bg-card/50 space-y-3">
-                      <div className="p-2.5 rounded-lg bg-accent/50 w-fit">
-                        <Icon className={`w-5 h-5 ${feat.color}`} />
-                      </div>
-                      <h3 className="text-sm font-semibold text-foreground">{feat.title}</h3>
-                      <p className="text-xs text-muted-foreground leading-relaxed">{feat.desc}</p>
-                    </div>
-                  );
-                })}
-              </div>
             </div>
+
+            {/* Footer — pinned to bottom, never scrolled */}
+            <footer className="flex-shrink-0 border-t border-border/30 px-6 py-2.5">
+              <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground/60">
+                <p>&copy; {new Date().getFullYear()} QueryFlow. All rights reserved.</p>
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => setShowTos(true)}
+                    className="hover:text-foreground transition-colors underline-offset-2 hover:underline"
+                  >
+                    Terms of Service
+                  </button>
+                  <span className="text-muted-foreground/20">|</span>
+                  <button
+                    onClick={() => setShowDataPolicy(true)}
+                    className="hover:text-foreground transition-colors underline-offset-2 hover:underline"
+                  >
+                    Data Handling &amp; Privacy
+                  </button>
+                </div>
+              </div>
+            </footer>
+
+            <TermsOfServiceModal open={showTos} onClose={() => setShowTos(false)} />
+            <DataPolicyModal open={showDataPolicy} onClose={() => setShowDataPolicy(false)} />
           </div>
         ) : (
         <ResizablePanelGroup direction="horizontal" className="h-full">
