@@ -122,8 +122,10 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, highlig
   }, [query.id, query.content, query.title, query.draftContent]);
 
   // Auto-save draft with debounce (crash-recovery copy only)
+  // Skip for virtual/demo queries (id <= 0)
   const debouncedDraftSave = useCallback(
     (newContent: string) => {
+      if (query.id <= 0) return;
       if (draftTimeoutRef.current) {
         clearTimeout(draftTimeoutRef.current);
       }
@@ -184,7 +186,9 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, highlig
   };
 
   // Manual Save: persists content + title, clears draft
+  // Skip for virtual/demo queries (id <= 0)
   const handleSave = () => {
+    if (query.id <= 0) return;
     if (draftTimeoutRef.current) {
       clearTimeout(draftTimeoutRef.current);
     }
@@ -206,7 +210,9 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, highlig
 
   const handleTitleSave = () => {
     setIsEditingTitle(false);
-    updateMutation.mutate({ id: query.id, data: { title } });
+    if (query.id > 0) {
+      updateMutation.mutate({ id: query.id, data: { title } });
+    }
   };
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -230,7 +236,9 @@ export function SqlEditor({ query, onContentChange, maxChars, modelName, highlig
       const name = file.name.replace(/\.[^.]+$/, "");
       if (name) {
         setTitle(name);
-        updateMutation.mutate({ id: query.id, data: { title: name } });
+        if (query.id > 0) {
+          updateMutation.mutate({ id: query.id, data: { title: name } });
+        }
       }
       toast({ title: "File loaded", description: `Loaded ${file.name}` });
     };

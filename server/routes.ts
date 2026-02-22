@@ -205,13 +205,20 @@ export async function registerRoutes(
       return res.status(400).json({ message: "Invalid query ID" });
     }
 
-    const query = await storage.getSqlQuery(queryId);
-    if (!query) {
-      return res.status(404).json({ message: "Query not found" });
-    }
+    // Demo mode: queryId <= 0 means virtual/in-memory query (no DB persistence)
+    const isDemoMode = queryId <= 0;
 
-    // Prefer the live editor content sent from the client; fall back to stored content
-    const sqlContent = (req.body.content || query.draftContent || query.content || "").toString();
+    let sqlContent: string;
+    if (isDemoMode) {
+      sqlContent = (req.body.content || "").toString();
+    } else {
+      const query = await storage.getSqlQuery(queryId);
+      if (!query) {
+        return res.status(404).json({ message: "Query not found" });
+      }
+      // Prefer the live editor content sent from the client; fall back to stored content
+      sqlContent = (req.body.content || query.draftContent || query.content || "").toString();
+    }
 
     if (!sqlContent.trim()) {
       return res.json([]);
@@ -245,19 +252,19 @@ export async function registerRoutes(
       ? allSettings.filter(s => s.enabled).map(s => s.agentType)
       : [...ALL_CATEGORIES];
 
-    // Gather schema context (includes voice annotations)
-    const schemas = await storage.getUserSchemas();
+    // Gather schema context (includes voice annotations) — skip for demo
+    const schemas = isDemoMode ? [] : await storage.getUserSchemas();
     const schemaContext = await buildSchemaContext(schemas);
 
     // Gather document context
-    const docs = await storage.getDocuments();
+    const docs = isDemoMode ? [] : await storage.getDocuments();
     const docContext = docs.length > 0
       ? docs.map(d => d.content).join("\n\n---\n\n")
       : undefined;
 
     // Gather full previous feedback state so the LLM can learn from user
-    // decisions: accepted (resolved + !dismissed), dismissed (resolved + dismissed), and unresolved.
-    const existingFeedback = await storage.getFeedbackByQueryId(queryId);
+    // decisions — skip for demo (no persisted feedback).
+    const existingFeedback = isDemoMode ? [] : await storage.getFeedbackByQueryId(queryId);
     const previousFeedback = existingFeedback.map(f => ({
       agentType: f.agentType,
       severity: f.severity,
@@ -271,9 +278,11 @@ export async function registerRoutes(
 
     // Clear only unresolved feedback; keep resolved items as a persistent
     // dismissal record so context survives across multiple analyses.
-    const unresolvedIds = existingFeedback.filter(f => !f.isResolved).map(f => f.id);
-    for (const uid of unresolvedIds) {
-      await storage.deleteFeedbackById(uid);
+    if (!isDemoMode) {
+      const unresolvedIds = existingFeedback.filter(f => !f.isResolved).map(f => f.id);
+      for (const uid of unresolvedIds) {
+        await storage.deleteFeedbackById(uid);
+      }
     }
 
     try {
@@ -311,8 +320,18 @@ export async function registerRoutes(
         };
       });
 
-      const created = await storage.createFeedbackBatch(feedbackItems);
-      sendEvent({ done: true, results: created });
+      if (isDemoMode) {
+        // Demo mode: return virtual results without persisting to DB
+        const virtualResults = feedbackItems.map((item, idx) => ({
+          ...item,
+          id: -(idx + 1),
+          createdAt: new Date(),
+        }));
+        sendEvent({ done: true, results: virtualResults });
+      } else {
+        const created = await storage.createFeedbackBatch(feedbackItems);
+        sendEvent({ done: true, results: created });
+      }
     } catch (err) {
       console.error("LLM analysis failed:", err);
       sendEvent({ error: true, message: "Analysis failed. Please try again." });
@@ -1128,43 +1147,73 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
   });
 
   // ─── Demo Bootstrap ────────────────────────────────────────────────
-  // Generates an e-commerce schema + deliberately flawed analytical query
-  // via LLM and stores them in the DB for the demo experience. No auth needed.
+  // Returns a pre-seeded demo version (schema + flawed query) without
+  // writing anything to sql_queries or user_schemas. Fast and cost-free.
 
   app.post("/api/demo/bootstrap", async (req, res) => {
-    if (!isLLMConfigured()) {
-      return res.status(503).json({
-        message: "LLM not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY to enable demo.",
-      });
-    }
-
     try {
-      const demo = await llmGenerateDemo();
+      // Pick a random pre-seeded demo version
+      let demo = await storage.getRandomDemoVersion();
 
-      // Create schema in DB (userId: null for demo)
-      const schema = await storage.createUserSchema({
-        name: "Online Store (Demo)",
-        rawContent: demo.schema.ddl,
-        parsedDdl: demo.schema.ddl,
-        tables: demo.schema.tables,
-        fileName: "demo-ecommerce.sql",
-        userId: null,
-        description: "Demo e-commerce schema — generated by QueryFlow to showcase the analyzer.",
+      if (!demo) {
+        // Fallback: no seeded versions yet — generate one and store it
+        if (!isLLMConfigured()) {
+          return res.status(503).json({
+            message: "No demo versions available and LLM not configured.",
+          });
+        }
+        const generated = await llmGenerateDemo();
+        demo = await storage.createDemoVersion({
+          schemaName: "Online Store (Demo)",
+          schemaDdl: generated.schema.ddl,
+          schemaTables: generated.schema.tables,
+          queryTitle: generated.query.title,
+          queryContent: generated.query.content,
+        });
+      }
+
+      // Return demo data without creating any sql_queries/user_schemas rows
+      res.json({
+        query: { title: demo.queryTitle, content: demo.queryContent },
+        schema: { name: demo.schemaName, ddl: demo.schemaDdl, tables: demo.schemaTables },
       });
-
-      // Create query in DB (userId: null for demo)
-      const query = await storage.createSqlQuery({
-        title: demo.query.title,
-        content: demo.query.content,
-        userId: null,
-      });
-
-      res.json({ queryId: query.id, schemaId: schema.id, query, schema });
     } catch (err) {
       console.error("Demo bootstrap failed:", err);
       res.status(500).json({
-        message: "Failed to generate demo. Please try again.",
+        message: "Failed to load demo. Please try again.",
       });
+    }
+  });
+
+  // ─── Demo Seed (admin-only) ───────────────────────────────────────
+  // Generates and stores one demo version per call, up to 10 total.
+
+  app.post("/api/demo/seed", requireAdmin, async (req, res) => {
+    if (!isLLMConfigured()) {
+      return res.status(503).json({
+        message: "LLM not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY to enable seeding.",
+      });
+    }
+
+    const currentCount = await storage.getDemoVersionCount();
+    if (currentCount >= 10) {
+      return res.json({ message: "Already have 10 demo versions.", count: currentCount });
+    }
+
+    try {
+      const generated = await llmGenerateDemo();
+      await storage.createDemoVersion({
+        schemaName: "Online Store (Demo)",
+        schemaDdl: generated.schema.ddl,
+        schemaTables: generated.schema.tables,
+        queryTitle: generated.query.title,
+        queryContent: generated.query.content,
+      });
+      const newCount = await storage.getDemoVersionCount();
+      res.json({ message: `Demo version created. ${newCount}/10 seeded.`, count: newCount });
+    } catch (err) {
+      console.error("Demo seed failed:", err);
+      res.status(500).json({ message: "Failed to generate demo version." });
     }
   });
 
