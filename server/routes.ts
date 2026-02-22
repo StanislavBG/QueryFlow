@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
 import { formatSQL } from "./formatter";
-import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo } from "./llm";
+import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, llmGenerateQueryFromVoice } from "./llm";
 import { requireAdmin, resolveAppUser, logActivity } from "./auth";
 
 // All available analysis categories
@@ -1010,6 +1010,59 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
       }
       console.error("Transcription failed:", err);
       res.status(500).json({ message: "Transcription failed" });
+    }
+  });
+
+  // ─── Voice-to-Query Route ──────────────────────────────────────────
+  // Generates a SQL query from a voice transcript using schemas, context,
+  // and existing queries as full context for the LLM.
+
+  app.post("/api/voice-to-query", async (req, res) => {
+    try {
+      const input = z.object({
+        transcript: z.string().trim().min(1).max(10000),
+        dialect: z.string().optional(),
+      }).parse(req.body);
+
+      const { userId } = getAuth(req);
+
+      // Require authentication — voice-to-query uses user-scoped data
+      if (!userId) {
+        return res.status(401).json({ message: "Authentication required for voice-to-query." });
+      }
+
+      if (!isLLMConfigured()) {
+        return res.status(503).json({
+          message: "LLM not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY to enable voice-to-query.",
+        });
+      }
+
+      logActivity(userId, "voice.query", "query");
+
+      // Gather full context: schemas + voice annotations (user-scoped)
+      const schemas = await storage.getUserSchemas(userId);
+      const schemaContext = await buildSchemaContext(schemas);
+
+      // Gather recent existing queries for pattern learning (bounded to 20 most recent)
+      const existingQueries = await storage.getSqlQueries(userId);
+      const queryContext = existingQueries
+        .filter((q) => q.content && q.content.trim().length > 0)
+        .slice(0, 20)
+        .map((q) => ({ title: q.title, content: q.content.slice(0, 2000) }));
+
+      const result = await llmGenerateQueryFromVoice(input.transcript, {
+        dialect: input.dialect,
+        schemas: schemaContext,
+        existingQueries: queryContext.length > 0 ? queryContext : undefined,
+      });
+
+      res.json(result);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error("Voice-to-query failed:", err);
+      res.status(500).json({ message: "Failed to generate query from voice." });
     }
   });
 

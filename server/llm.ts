@@ -646,6 +646,84 @@ ${rawContent}`,
 }
 
 /**
+ * Generate a SQL query from a voice transcript using full context:
+ * - Schema definitions (DDL + voice context annotations)
+ * - All existing user queries (to learn patterns and intent)
+ * - The voice transcript describing what the user wants
+ *
+ * Returns a structured query with title and SQL content.
+ */
+export async function llmGenerateQueryFromVoice(
+  voiceTranscript: string,
+  options: {
+    dialect?: string;
+    schemas?: string;
+    existingQueries?: Array<{ title: string; content: string }>;
+  } = {}
+): Promise<{ title: string; content: string }> {
+  const openai = getClient();
+
+  const dialect = options.dialect || "Standard SQL";
+  const contextParts: string[] = [];
+
+  contextParts.push(`Target SQL dialect: ${dialect}`);
+
+  if (options.schemas) {
+    contextParts.push(`\nAvailable schema definitions (including domain-specific context annotations):\n${options.schemas}`);
+  }
+
+  if (options.existingQueries && options.existingQueries.length > 0) {
+    const querySummaries = options.existingQueries
+      .map((q, i) => `### Query ${i + 1}: "${q.title}"\n\`\`\`sql\n${q.content}\n\`\`\``)
+      .join("\n\n");
+    contextParts.push(`\nUser's existing queries (use these to understand their style, patterns, and what they typically work on):\n${querySummaries}`);
+  }
+
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 8192,
+    messages: [
+      {
+        role: "user",
+        content: `You are an expert SQL query writer. A user described what they want via voice input. Generate the SQL query they are asking for.
+
+${contextParts.join("\n")}
+
+RULES:
+- Write clean, production-quality ${dialect} SQL
+- Use proper table and column names from the provided schemas
+- Follow the user's existing query style and patterns when available
+- Include a brief comment header explaining the query's purpose
+- Use schema voice context annotations to understand business meanings of tables/columns
+- If the user's request is ambiguous, make reasonable assumptions based on the schema and existing queries
+- Return ONLY a JSON object with "title" and "content" fields
+
+Voice transcript (what the user said):
+"${voiceTranscript}"
+
+Return a JSON object:
+{
+  "title": "Brief descriptive title for the query",
+  "content": "-- SQL query here\\nSELECT ..."
+}`,
+      },
+    ],
+  });
+
+  const text = extractText(response);
+  const result = extractJsonObject(text);
+
+  if (!result || typeof result.content !== "string") {
+    throw new Error("Failed to generate query from voice input — LLM returned unparseable response");
+  }
+
+  return {
+    title: typeof result.title === "string" ? result.title : "Voice Query",
+    content: result.content as string,
+  };
+}
+
+/**
  * Generate a demo e-commerce schema and a deliberately flawed analytical SQL
  * query for the bootstrap demo experience.
  *
