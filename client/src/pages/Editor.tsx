@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas } from "@/hooks/use-sql-queries";
+import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas, useDemoBootstrap } from "@/hooks/use-sql-queries";
 import { QueryDocumentList } from "@/components/QueryDocumentList";
 import { SqlEditor } from "@/components/SqlEditor";
 import { FeedbackPanel } from "@/components/FeedbackPanel";
@@ -17,10 +17,10 @@ import {
 } from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield } from "lucide-react";
+import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
 import { useCurrentUser } from "@/hooks/use-admin";
 import { useLocation } from "wouter";
 import {
@@ -110,6 +110,27 @@ export default function Editor() {
   const [, setLocation] = useLocation();
   const isAdmin = currentUser?.authenticated && currentUser?.role === "admin";
 
+  // --- demo state ---
+  const { isSignedIn } = useAuth();
+  const demoMutation = useDemoBootstrap();
+  const [autoAnalyze, setAutoAnalyze] = useState(false);
+  const [isDemoQuery, setIsDemoQuery] = useState(false);
+
+  // When user signs in, drop any demo query/schema from local state
+  const prevSignedIn = useRef(isSignedIn);
+  useEffect(() => {
+    if (isSignedIn && !prevSignedIn.current) {
+      // User just signed in — clear demo state
+      if (isDemoQuery) {
+        setSelectedQueryId(null);
+        setCurrentContent("");
+        setIsDemoQuery(false);
+        setAutoAnalyze(false);
+      }
+    }
+    prevSignedIn.current = isSignedIn;
+  }, [isSignedIn, isDemoQuery]);
+
   // Schema drill-down selection state (for schemas tab)
   const [schemaSelection, setSchemaSelection] = useState<SchemaSelection | null>(null);
 
@@ -195,6 +216,18 @@ export default function Editor() {
   const editorHighlightedLines = useMemo(() => {
     return feedbackHighlightedLines;
   }, [feedbackHighlightedLines]);
+
+  const handleDemoBootstrap = useCallback(() => {
+    demoMutation.mutate(undefined, {
+      onSuccess: (result) => {
+        setSelectedQueryId(result.queryId);
+        setCurrentContent(result.query.content);
+        setIsDemoQuery(true);
+        // Delay auto-analyze slightly to let react-query settle
+        setTimeout(() => setAutoAnalyze(true), 500);
+      },
+    });
+  }, [demoMutation]);
 
   // Resolve the best available query content – prefer the live editor text,
   // but fall back to the persisted draft or saved content so the Visual tab
@@ -529,12 +562,45 @@ export default function Editor() {
                         scrollToLine={scrollToLine}
                       />
                     ) : (
-                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
+                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-4">
                         <FileCode2 className="w-10 h-10 opacity-30" />
-                        <p className="text-sm font-medium">No query selected</p>
-                        <p className="text-xs opacity-60 max-w-[240px] text-center">
-                          Create a new query from the sidebar or select an existing one to get started.
-                        </p>
+                        {isSignedIn ? (
+                          <>
+                            <p className="text-sm font-medium">Welcome to QueryFlow</p>
+                            <p className="text-xs opacity-60 max-w-[280px] text-center">
+                              Create your first query from the sidebar to get started. Paste any SQL and hit Analyze to get instant, actionable feedback.
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-sm font-medium">No query selected</p>
+                            <p className="text-xs opacity-60 max-w-[280px] text-center">
+                              Try our interactive demo to see QueryFlow analyze a real-world SQL query with common business analyst mistakes.
+                            </p>
+                            <Button
+                              onClick={handleDemoBootstrap}
+                              disabled={demoMutation.isPending}
+                              className="h-9 px-5 text-sm gap-2"
+                            >
+                              {demoMutation.isPending ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                  Generating demo...
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="w-4 h-4" />
+                                  Try Demo
+                                </>
+                              )}
+                            </Button>
+                            {demoMutation.isPending && (
+                              <p className="text-[10px] opacity-40 max-w-[240px] text-center">
+                                Generating an e-commerce schema and analytical query with common BA mistakes...
+                              </p>
+                            )}
+                          </>
+                        )}
                       </div>
                     )}
                   </>
@@ -581,6 +647,8 @@ export default function Editor() {
                       setCurrentContent(current.replace(beforeSql, afterSql));
                     }
                   }}
+                  autoAnalyze={autoAnalyze}
+                  onAutoAnalyzed={() => setAutoAnalyze(false)}
                 />
               )}
 
