@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Play, Sparkles, AlertCircle, Mic, Key, Columns3, Lock, ExternalLink, Scale } from "lucide-react";
+import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, GitBranch, Plus, X, Boxes, Shield, Play, Sparkles, AlertCircle, Mic, Key, Columns3, Lock, ExternalLink, Scale, Terminal, Trash2, Copy, ChevronDown, ChevronUp } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -309,6 +309,187 @@ function makeDemoQuery(result: DemoBootstrapResult): SqlQuery {
     createdAt: new Date(),
     updatedAt: new Date(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// LLM Error Console — floating panel for debugging LLM failures
+// ---------------------------------------------------------------------------
+
+interface LlmErrorEntry {
+  id: number;
+  timestamp: string;
+  source: string;
+  message: string;
+  rawResponse?: string;
+  inputPreview?: string;
+}
+
+function LlmErrorConsole({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [errors, setErrors] = useState<LlmErrorEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const { toast } = useToast();
+
+  const fetchErrors = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/llm-errors");
+      if (res.ok) setErrors(await res.json());
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (open) fetchErrors();
+  }, [open, fetchErrors]);
+
+  // Auto-poll while open
+  useEffect(() => {
+    if (!open) return;
+    const interval = setInterval(fetchErrors, 5000);
+    return () => clearInterval(interval);
+  }, [open, fetchErrors]);
+
+  const handleClear = async () => {
+    await fetch("/api/llm-errors", { method: "DELETE" });
+    setErrors([]);
+  };
+
+  const handleCopyAll = () => {
+    const text = errors.map(e =>
+      `[${e.timestamp}] [${e.source}] ${e.message}${e.rawResponse ? `\n--- RAW RESPONSE ---\n${e.rawResponse}` : ""}${e.inputPreview ? `\n--- INPUT ---\n${e.inputPreview}` : ""}`
+    ).join("\n\n" + "=".repeat(60) + "\n\n");
+    navigator.clipboard.writeText(text);
+    toast({ title: "Copied to clipboard", description: `${errors.length} error(s) copied` });
+  };
+
+  const handleCopyOne = (e: LlmErrorEntry) => {
+    const text = `[${e.timestamp}] [${e.source}] ${e.message}${e.rawResponse ? `\n--- RAW RESPONSE ---\n${e.rawResponse}` : ""}${e.inputPreview ? `\n--- INPUT ---\n${e.inputPreview}` : ""}`;
+    navigator.clipboard.writeText(text);
+    toast({ title: "Copied", description: "Error details copied" });
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card shadow-2xl" style={{ maxHeight: "40vh" }}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/50">
+        <div className="flex items-center gap-2">
+          <Terminal className="w-4 h-4 text-destructive" />
+          <span className="text-xs font-semibold text-foreground">
+            LLM Error Console
+          </span>
+          <Badge variant="outline" className="text-[10px] h-5 bg-destructive/10 text-destructive border-destructive/30">
+            {errors.length}
+          </Badge>
+          {loading && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={handleCopyAll}
+            disabled={errors.length === 0}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 transition-colors"
+            title="Copy all errors"
+          >
+            <Copy className="w-3 h-3" /> Copy All
+          </button>
+          <button
+            onClick={handleClear}
+            disabled={errors.length === 0}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 transition-colors"
+            title="Clear errors"
+          >
+            <Trash2 className="w-3 h-3" /> Clear
+          </button>
+          <button
+            onClick={fetchErrors}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="Refresh"
+          >
+            Refresh
+          </button>
+          <button onClick={onClose} className="p-1 rounded hover:bg-muted transition-colors">
+            <X className="w-3.5 h-3.5 text-muted-foreground" />
+          </button>
+        </div>
+      </div>
+
+      {/* Error list */}
+      <div className="overflow-auto" style={{ maxHeight: "calc(40vh - 40px)" }}>
+        {errors.length === 0 ? (
+          <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
+            No LLM errors recorded. Errors from Analyze, Waterfall, Format, and other LLM calls will appear here.
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {errors.slice().reverse().map((entry) => {
+              const isExpanded = expandedId === entry.id;
+              return (
+                <div key={entry.id} className="text-xs">
+                  <div
+                    className="flex items-start gap-2 px-4 py-2 cursor-pointer hover:bg-muted/30 transition-colors"
+                    onClick={() => setExpandedId(isExpanded ? null : entry.id)}
+                  >
+                    {isExpanded ? (
+                      <ChevronUp className="w-3 h-3 text-muted-foreground mt-0.5 flex-shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-3 h-3 text-muted-foreground mt-0.5 flex-shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <Badge
+                          variant="outline"
+                          className="text-[9px] h-4 px-1.5 bg-destructive/10 text-destructive border-destructive/30"
+                        >
+                          {entry.source}
+                        </Badge>
+                        <span className="text-[10px] text-muted-foreground">
+                          {new Date(entry.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+                      <p className="text-foreground font-mono truncate">{entry.message}</p>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleCopyOne(entry); }}
+                      className="p-1 rounded hover:bg-muted transition-colors flex-shrink-0"
+                      title="Copy this error"
+                    >
+                      <Copy className="w-3 h-3 text-muted-foreground" />
+                    </button>
+                  </div>
+                  {isExpanded && (
+                    <div className="px-4 pb-3 pl-9 space-y-2">
+                      {entry.rawResponse && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+                            Raw LLM Response
+                          </p>
+                          <pre className="text-[11px] font-mono bg-muted/50 rounded p-2 whitespace-pre-wrap break-all max-h-48 overflow-auto border border-border">
+                            {entry.rawResponse}
+                          </pre>
+                        </div>
+                      )}
+                      {entry.inputPreview && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+                            Input Preview
+                          </p>
+                          <pre className="text-[11px] font-mono bg-muted/50 rounded p-2 whitespace-pre-wrap break-all max-h-32 overflow-auto border border-border">
+                            {entry.inputPreview}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -655,6 +836,7 @@ export default function Editor() {
   // --- landing page modals ---
   const [showTos, setShowTos] = useState(false);
   const [showDataPolicy, setShowDataPolicy] = useState(false);
+  const [showErrorConsole, setShowErrorConsole] = useState(false);
 
   // When user signs in, drop any demo query/schema from local state
   const prevSignedIn = useRef(isSignedIn);
@@ -921,6 +1103,22 @@ export default function Editor() {
           </Tooltip>
 
           <SettingsDialog />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={showErrorConsole ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setShowErrorConsole((v) => !v)}
+                className="h-7 w-7 p-0"
+              >
+                <Terminal className="w-3.5 h-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p className="text-xs">LLM Error Console</p>
+            </TooltipContent>
+          </Tooltip>
 
           <div className="h-4 w-px bg-border" />
 
@@ -1346,6 +1544,9 @@ GROUP BY 1 ORDER BY 1`}
         </ResizablePanelGroup>
         )}
       </div>
+
+      {/* LLM Error Console — floating at bottom */}
+      <LlmErrorConsole open={showErrorConsole} onClose={() => setShowErrorConsole(false)} />
     </div>
   );
 }
