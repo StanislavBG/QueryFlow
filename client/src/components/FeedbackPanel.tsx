@@ -1,4 +1,4 @@
-import { useQueryFeedback, useAnalyzeQuery, useResolveFeedback, useDismissFeedback, useDeleteFeedbackItem, type AnalysisProgress } from "@/hooks/use-sql-queries";
+import { useQueryFeedback, useResolveFeedback, useDismissFeedback, useDeleteFeedbackItem, type AnalysisProgress } from "@/hooks/use-sql-queries";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -18,7 +18,6 @@ import {
   Zap,
   Bug,
   Palette,
-  PlayCircle,
   BookOpen,
   AlignLeft,
   Shield,
@@ -27,7 +26,7 @@ import {
   Lightbulb,
   Tag,
 } from "lucide-react";
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import type { QueryFeedbackRow } from "@shared/schema";
 
 const severityConfig = {
@@ -398,33 +397,13 @@ interface FeedbackPanelProps {
   onFeedbackHover?: (lineNumbers: Set<number>) => void;
   onApplySuggestion?: (beforeSql: string, afterSql: string) => void;
   onScrollToLine?: (line: number) => void;
-  autoAnalyze?: boolean;
-  onAutoAnalyzed?: () => void;
+  isAnalyzing?: boolean;
+  analysisProgress?: AnalysisProgress | null;
 }
 
-export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, activeLine, onFeedbackHover, onApplySuggestion, onScrollToLine, autoAnalyze, onAutoAnalyzed }: FeedbackPanelProps) {
+export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, activeLine, onFeedbackHover, onApplySuggestion, onScrollToLine, isAnalyzing, analysisProgress }: FeedbackPanelProps) {
   const { data: feedback, isLoading: isFeedbackLoading } = useQueryFeedback(queryId);
-  const { progress: analysisProgress, ...analyzeMutation } = useAnalyzeQuery();
   const [filter, setFilter] = useState<string | null>(null);
-  const autoAnalyzeTriggered = useRef(false);
-
-  const handleAnalyze = () => {
-    if (queryId) {
-      analyzeMutation.mutate({ queryId, dialect, content: queryContent });
-    }
-  };
-
-  // Auto-trigger analysis when requested (e.g., after demo bootstrap)
-  useEffect(() => {
-    if (autoAnalyze && queryId && queryContent?.trim() && !analyzeMutation.isPending && !autoAnalyzeTriggered.current) {
-      autoAnalyzeTriggered.current = true;
-      analyzeMutation.mutate({ queryId, dialect, content: queryContent });
-      onAutoAnalyzed?.();
-    }
-    if (!autoAnalyze) {
-      autoAnalyzeTriggered.current = false;
-    }
-  }, [autoAnalyze, queryId, queryContent]);
 
   const handleFeedbackHover = useCallback((feedbackId: number | null) => {
     if (!feedback || !onFeedbackHover) return;
@@ -492,19 +471,6 @@ export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, act
       <div className="p-3 border-b border-border space-y-2">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold">Analysis</h3>
-          <Button
-            size="sm"
-            onClick={handleAnalyze}
-            disabled={analyzeMutation.isPending}
-            className="h-7 text-xs"
-          >
-            {analyzeMutation.isPending ? (
-              <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
-            ) : (
-              <PlayCircle className="w-3 h-3 mr-1.5" />
-            )}
-            Analyze
-          </Button>
         </div>
 
         {/* Dynamic filter badges */}
@@ -548,7 +514,7 @@ export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, act
       </div>
 
       {/* Step tracker while analyzing */}
-      {analyzeMutation.isPending && analysisProgress && (
+      {isAnalyzing && analysisProgress && (
         <AnalysisStepTracker progress={analysisProgress} />
       )}
 
@@ -560,7 +526,7 @@ export function FeedbackPanel({ queryId, dialect, queryContent, hoveredLine, act
               <Loader2 className="w-5 h-5 animate-spin text-muted-foreground mb-3" />
               <p className="text-xs text-muted-foreground">Loading...</p>
             </div>
-          ) : analyzeMutation.isPending ? (
+          ) : isAnalyzing ? (
             <div className="flex flex-col items-center justify-center py-12 px-4">
               <Loader2 className="w-5 h-5 animate-spin text-primary mb-3" />
               <p className="text-xs text-muted-foreground">
