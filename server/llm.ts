@@ -642,3 +642,130 @@ ${rawContent}`,
 
   return { parsed: ddl, tables };
 }
+
+/**
+ * Generate a demo e-commerce schema and a deliberately flawed analytical SQL
+ * query for the bootstrap demo experience.
+ *
+ * Single LLM call — returns a coherent schema + query pair where the query
+ * contains realistic business-analyst mistakes that the analyzer can catch.
+ */
+export async function llmGenerateDemo(): Promise<{
+  schema: { ddl: string; tables: ParsedTable[] };
+  query: { title: string; content: string };
+}> {
+  const openai = getClient();
+
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 16384,
+    messages: [
+      {
+        role: "user",
+        content: `You are generating a demo dataset for QueryFlow, a SQL query analyzer. Generate two things in a single JSON response:
+
+## 1. E-Commerce Database Schema (7 tables)
+
+Create a realistic online retail store schema with these tables:
+- **customers** — id, name, email, city, state, created_at, is_active
+- **categories** — id, name, parent_category_id
+- **products** — id, name, category_id (FK→categories), price, cost, stock_status, created_at, is_discontinued
+- **orders** — id, customer_id (FK→customers), order_date, status (enum: 'pending','confirmed','shipped','delivered','cancelled','refunded'), total_amount, discount_amount, shipping_cost
+- **order_items** — id, order_id (FK→orders), product_id (FK→products), quantity, unit_price, line_total
+- **returns** — id, order_id (FK→orders), order_item_id (FK→order_items), return_date, reason, refund_amount, status
+- **inventory** — id, product_id (FK→products), warehouse_id, quantity_on_hand, reorder_point, last_updated
+
+Use MySQL syntax for the DDL. Include proper PRIMARY KEYs, FOREIGN KEYs, and realistic data types.
+
+## 2. Deliberately Flawed Analytical Query (40-60 lines)
+
+Write a multi-CTE analytical SQL query titled "Monthly Revenue & Customer Analytics Dashboard" that a business analyst might write. It should look professional with helpful comments and meaningful aliases, but contain these **specific embedded mistakes** that the analyzer will catch:
+
+1. **Inflated revenue** — The revenue SUM does NOT subtract returns/refunds, so totals are overstated
+2. **Counting cancelled orders** — No WHERE filter on order status, so cancelled and refunded orders are counted as valid sales
+3. **Wrong JOIN type** — Uses LEFT JOIN where INNER JOIN is needed (e.g., joining orders to order_items with LEFT JOIN when you only want orders WITH items), causing NULLs to propagate
+4. **SELECT * in a CTE** — Pulls all columns from the customers table unnecessarily, causing GROUP BY issues
+5. **Missing NULL handling** — No COALESCE on nullable LEFT JOIN results used in arithmetic (e.g., division or subtraction with potential NULLs)
+6. **No date range filter** — The main revenue CTE has no date boundary, scanning ALL historical data for a "monthly" report
+7. **Hardcoded year** — Uses literal '2024' in one CTE instead of YEAR(CURDATE()) or a parameter
+8. **Cartesian join risk** — A JOIN condition in the final SELECT that causes row multiplication (e.g., joining two CTEs on a non-unique key or a condition like \`cr.total_orders > 1\` instead of a proper key match)
+9. **Division by zero** — A ratio calculation (e.g., turnover_ratio = on_hand / total_sold) that will fail when the denominator is 0
+
+The query must use MySQL syntax. Make the bugs **subtle** — they should look natural, like honest mistakes a busy analyst would make. Include a header comment block with title, department, and a date.
+
+## Output Format
+
+Return ONLY a JSON object with this exact structure (no markdown fences, no explanation):
+
+{
+  "schema": {
+    "ddl": "CREATE TABLE customers (\\n  id INT AUTO_INCREMENT PRIMARY KEY,\\n  ...\\n);\\n\\nCREATE TABLE ...",
+    "tables": [
+      {
+        "name": "customers",
+        "columns": [
+          {"name": "id", "type": "INT", "isPrimaryKey": true},
+          {"name": "name", "type": "VARCHAR(100)", "isPrimaryKey": false}
+        ],
+        "relationships": []
+      }
+    ]
+  },
+  "query": {
+    "title": "Monthly Revenue & Customer Analytics Dashboard",
+    "content": "-- Monthly Revenue & Customer Analytics Dashboard\\n-- Department: Sales Analytics\\n..."
+  }
+}`,
+      },
+    ],
+  });
+
+  const text = extractText(response);
+  const result = extractJsonObject(text);
+
+  if (!result) {
+    throw new Error("Failed to parse demo generation response from LLM");
+  }
+
+  // Validate schema
+  const schemaData = result.schema as Record<string, unknown> | undefined;
+  if (!schemaData || typeof schemaData.ddl !== "string" || !Array.isArray(schemaData.tables)) {
+    throw new Error("LLM demo response missing valid schema data");
+  }
+
+  // Normalize tables
+  const tables: ParsedTable[] = (schemaData.tables as Array<Record<string, unknown>>)
+    .filter((t) => typeof t.name === "string" && Array.isArray(t.columns))
+    .map((t) => ({
+      name: t.name as string,
+      columns: (t.columns as Array<Record<string, unknown>>).map((c) => ({
+        name: String(c.name || ""),
+        type: String(c.type || ""),
+        isPrimaryKey: !!c.isPrimaryKey,
+      })),
+      relationships: Array.isArray(t.relationships)
+        ? (t.relationships as Array<Record<string, unknown>>).map((r) => ({
+            fromCol: String(r.fromCol || ""),
+            toTable: String(r.toTable || ""),
+            toCol: String(r.toCol || ""),
+          }))
+        : [],
+    }));
+
+  // Validate query
+  const queryData = result.query as Record<string, unknown> | undefined;
+  if (!queryData || typeof queryData.content !== "string" || !queryData.content) {
+    throw new Error("LLM demo response missing valid query data");
+  }
+
+  return {
+    schema: {
+      ddl: schemaData.ddl as string,
+      tables,
+    },
+    query: {
+      title: (queryData.title as string) || "Monthly Revenue & Customer Analytics Dashboard",
+      content: queryData.content as string,
+    },
+  };
+}
