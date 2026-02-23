@@ -558,6 +558,11 @@ export class DatabaseStorage implements IStorage {
     const [created] = await db.insert(demoVersions).values(data).returning();
     return created;
   }
+
+  async deleteAllDemoVersions(): Promise<number> {
+    const result = await db.delete(demoVersions).returning();
+    return result.length;
+  }
 }
 
 export const storage = new DatabaseStorage();
