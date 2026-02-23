@@ -783,7 +783,7 @@ Return a JSON object:
 }
 
 // ---------------------------------------------------------------------------
-// Demo Scenarios — 5 diverse, intuitive themes any user can follow
+// Demo Scenario — single Online Bookstore theme for consistent demo experience
 // ---------------------------------------------------------------------------
 
 const DEMO_SCENARIOS: Array<{
@@ -808,70 +808,6 @@ const DEMO_SCENARIOS: Array<{
 2. **Missing NULL handling** — LEFT JOIN from books to order_items without COALESCE, so books with zero sales show NULL instead of 0 in arithmetic
 3. **No date range filter** — queries ALL historical data for a "monthly" report, making it slow and misleading
 4. **Division by zero** — calculates avg_revenue_per_order = total_revenue / order_count, but order_count can be 0 for some genres`,
-  },
-  {
-    schemaName: "Employee Payroll",
-    title: "Quarterly Payroll Summary by Department",
-    theme: "A company HR system with departments, employees, salaries, and bonuses.",
-    tables: `Create 5 tables:
-- **departments** — id, name, budget
-- **employees** — id, first_name, last_name, department_id (FK→departments), hire_date, is_active
-- **salaries** — id, employee_id (FK→employees), effective_date, amount
-- **bonuses** — id, employee_id (FK→employees), bonus_date, amount, reason
-- **time_off** — id, employee_id (FK→employees), start_date, end_date, type ('sick','vacation','personal')`,
-    mistakes: `The query should summarize quarterly payroll costs per department, including bonuses. Embed these 4 mistakes:
-1. **Includes terminated employees** — no filter on employees.is_active, so departed staff salaries are still counted
-2. **Wrong JOIN inflates totals** — joins salaries to bonuses without proper grouping first, causing row multiplication (cartesian product) that inflates the total payroll
-3. **Hardcoded quarter** — uses literal dates '2024-01-01' and '2024-03-31' instead of dynamic quarter boundaries
-4. **Missing NULL handling** — LEFT JOIN to bonuses without COALESCE, so departments with no bonuses produce NULL in the total_compensation sum`,
-  },
-  {
-    schemaName: "Student Grades",
-    title: "Student GPA and Course Performance Report",
-    theme: "A university system tracking students, courses, enrollments, and grades.",
-    tables: `Create 5 tables:
-- **students** — id, name, email, major, enrollment_year, is_active
-- **professors** — id, name, department
-- **courses** — id, course_name, course_code, professor_id (FK→professors), credits
-- **enrollments** — id, student_id (FK→students), course_id (FK→courses), semester, year, grade (e.g. 'A','B','C','D','F','W','I')
-- **attendance** — id, enrollment_id (FK→enrollments), class_date, status ('present','absent','late')`,
-    mistakes: `The query should calculate each student's GPA and identify students at risk of academic probation. Embed these 4 mistakes:
-1. **Counts withdrawn/incomplete grades in GPA** — no filter to exclude 'W' (withdrawn) and 'I' (incomplete) grades, which should not factor into GPA calculation
-2. **Includes inactive students** — no filter on students.is_active, so expelled or graduated students appear in the "at risk" list
-3. **Wrong GPA formula** — calculates GPA as AVG of grade points instead of the credit-weighted average (SUM(grade_points * credits) / SUM(credits)), giving misleading results
-4. **No semester filter** — computes GPA across ALL semesters instead of the current one, mixing old and new performance`,
-  },
-  {
-    schemaName: "Restaurant Orders",
-    title: "Daily Revenue and Popular Menu Items Report",
-    theme: "A restaurant POS system tracking menu items, tables, orders, and payments.",
-    tables: `Create 5 tables:
-- **menu_items** — id, name, category ('appetizer','main','dessert','drink'), price, is_available
-- **tables** — id, table_number, capacity
-- **orders** — id, table_id (FK→tables), order_time, status ('open','served','paid','voided'), server_name
-- **order_items** — id, order_id (FK→orders), menu_item_id (FK→menu_items), quantity, item_price, notes
-- **payments** — id, order_id (FK→orders), payment_method ('cash','credit','debit'), amount, tip, payment_time`,
-    mistakes: `The query should calculate daily revenue by menu category and identify the most popular items. Embed these 4 mistakes:
-1. **Counts voided orders in revenue** — no WHERE filter excluding status = 'voided', so cancelled meals inflate the daily total
-2. **Double-counts split payments** — joins orders to payments without accounting for multiple payment records per order (when customers split the bill), multiplying the order_items rows
-3. **Uses item_price from order_items but should use quantity * item_price** — the revenue SUM uses just item_price instead of quantity * item_price, undercounting when quantity > 1
-4. **No date filter** — the "daily" report has no WHERE on order_time, so it scans and sums the entire history`,
-  },
-  {
-    schemaName: "Project Tracker",
-    title: "Sprint Velocity and Bug Resolution Report",
-    theme: "A software team's project management system tracking projects, sprints, tickets, and developers.",
-    tables: `Create 5 tables:
-- **projects** — id, name, start_date, status ('active','completed','on_hold')
-- **developers** — id, name, role ('frontend','backend','fullstack','qa'), is_active
-- **sprints** — id, project_id (FK→projects), sprint_name, start_date, end_date, status ('planning','active','completed')
-- **tickets** — id, sprint_id (FK→sprints), assigned_to (FK→developers), title, type ('feature','bug','task'), status ('open','in_progress','done','wontfix'), story_points, created_at, resolved_at
-- **comments** — id, ticket_id (FK→tickets), author_id (FK→developers), content, created_at`,
-    mistakes: `The query should calculate sprint velocity (completed story points) and bug resolution time. Embed these 4 mistakes:
-1. **Counts 'wontfix' tickets as completed work** — no filter excluding status = 'wontfix' from the velocity calculation, inflating the team's throughput
-2. **Includes on_hold projects** — no filter on projects.status, so paused projects skew the velocity metrics
-3. **Wrong date diff for resolution time** — calculates bug resolution as resolved_at - created_at but doesn't filter out tickets where resolved_at IS NULL (still open bugs), causing NULL to propagate through AVG
-4. **Division by zero in velocity ratio** — calculates points_per_developer = total_points / developer_count, but some sprints may have 0 assigned developers`,
   },
 ];
 
