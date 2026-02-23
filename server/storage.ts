@@ -171,15 +171,13 @@ export class DatabaseStorage implements IStorage {
 
   // SQL Queries (userId-scoped)
   async getSqlQueries(userId?: string): Promise<SqlQuery[]> {
-    let rows: SqlQuery[];
-    if (userId) {
-      // Authenticated users see only their own queries (no demo/null-user rows)
-      rows = await db.select().from(sqlQueries)
-        .where(eq(sqlQueries.userId, userId))
-        .orderBy(desc(sqlQueries.updatedAt));
-    } else {
-      rows = await db.select().from(sqlQueries).orderBy(desc(sqlQueries.updatedAt));
+    if (!userId) {
+      // Non-authenticated users see nothing — demo data is virtual, not stored
+      return [];
     }
+    const rows = await db.select().from(sqlQueries)
+      .where(eq(sqlQueries.userId, userId))
+      .orderBy(desc(sqlQueries.updatedAt));
     return rows.map(decryptSqlQuery);
   }
 
@@ -324,15 +322,13 @@ export class DatabaseStorage implements IStorage {
 
   // User Schemas (userId-scoped)
   async getUserSchemas(userId?: string): Promise<UserSchema[]> {
-    let rows: UserSchema[];
-    if (userId) {
-      // Authenticated users see only their own schemas (no demo/null-user rows)
-      rows = await db.select().from(userSchemas)
-        .where(eq(userSchemas.userId, userId))
-        .orderBy(desc(userSchemas.updatedAt));
-    } else {
-      rows = await db.select().from(userSchemas).orderBy(desc(userSchemas.updatedAt));
+    if (!userId) {
+      // Non-authenticated users see nothing — demo schemas are virtual, not stored
+      return [];
     }
+    const rows = await db.select().from(userSchemas)
+      .where(eq(userSchemas.userId, userId))
+      .orderBy(desc(userSchemas.updatedAt));
     return rows.map(decryptUserSchema);
   }
 
