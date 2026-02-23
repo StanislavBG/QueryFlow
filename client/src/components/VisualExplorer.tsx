@@ -54,6 +54,44 @@ export interface VisualExplorerProps {
 // Shadow node transformation
 // ---------------------------------------------------------------------------
 
+/**
+ * Enforce downward-only flow: every edge target must have a strictly greater
+ * stepIndex than its source.  When the LLM assigns the same (or lower) tier
+ * to a target, we push it (and everything downstream) one tier below its
+ * highest source.
+ */
+function enforceDownwardFlow(analysis: WaterfallAnalysis): WaterfallAnalysis {
+  const nodeMap = new Map(analysis.nodes.map((n) => [n.id, { ...n }]));
+
+  // Build adjacency: source → [targets]
+  const childrenOf = new Map<string, string[]>();
+  for (const edge of analysis.edges) {
+    if (!childrenOf.has(edge.fromNodeId)) childrenOf.set(edge.fromNodeId, []);
+    childrenOf.get(edge.fromNodeId)!.push(edge.toNodeId);
+  }
+
+  // Iteratively fix violations until stable (max 20 iterations to be safe)
+  let changed = true;
+  for (let iter = 0; iter < 20 && changed; iter++) {
+    changed = false;
+    for (const edge of analysis.edges) {
+      const from = nodeMap.get(edge.fromNodeId);
+      const to = nodeMap.get(edge.toNodeId);
+      if (!from || !to) continue;
+      if (to.stepIndex <= from.stepIndex) {
+        to.stepIndex = from.stepIndex + 1;
+        changed = true;
+      }
+    }
+  }
+
+  return {
+    nodes: Array.from(nodeMap.values()),
+    edges: analysis.edges,
+    summary: analysis.summary,
+  };
+}
+
 function addShadowNodes(analysis: WaterfallAnalysis): WaterfallAnalysis {
   const nodeById = new Map(analysis.nodes.map((n) => [n.id, n]));
   const sourceNodes = analysis.nodes.filter(
@@ -974,7 +1012,7 @@ export function VisualExplorer({
 
   const displayAnalysis = useMemo(() => {
     if (!analysis) return null;
-    return addShadowNodes(analysis);
+    return addShadowNodes(enforceDownwardFlow(analysis));
   }, [analysis]);
 
   // Use unscaled container width for layout so nodes don't shrink
