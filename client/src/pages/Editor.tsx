@@ -1310,7 +1310,7 @@ export default function Editor() {
 
                   {demoMutation.isPending && (
                     <p className="text-xs text-muted-foreground/60">
-                      Loading e-commerce schema &amp; analytics query with intentional mistakes...
+                      Loading demo schema &amp; query with intentional mistakes...
                     </p>
                   )}
                 </div>
@@ -1324,14 +1324,16 @@ export default function Editor() {
                       </p>
                     </div>
                     <pre className="p-3 text-[11px] font-mono text-muted-foreground leading-relaxed overflow-x-auto whitespace-pre">
-{`SELECT *
-FROM orders
-LEFT JOIN order_items
-  ON orders.id = order_items.order_id
--- no date filter, scans all history
--- LEFT JOIN inflates revenue with returns
--- SELECT * pulls unnecessary columns
-GROUP BY DATE_TRUNC('month', order_date)`}
+{`SELECT genre, SUM(oi.unit_price) AS revenue
+FROM books b
+LEFT JOIN order_items oi
+  ON b.id = oi.book_id
+LEFT JOIN orders o
+  ON oi.order_id = o.id
+-- counts cancelled orders as sales
+-- SUM uses unit_price, not quantity * unit_price
+-- no date filter — scans all history
+GROUP BY genre`}
                     </pre>
                   </div>
 
@@ -1342,16 +1344,17 @@ GROUP BY DATE_TRUNC('month', order_date)`}
                       </p>
                     </div>
                     <pre className="p-3 text-[11px] font-mono text-muted-foreground leading-relaxed overflow-x-auto whitespace-pre">
-{`SELECT
-  DATE_TRUNC('month', o.order_date) AS month,
-  SUM(oi.amount) AS revenue
-FROM orders o
+{`SELECT b.genre,
+  SUM(oi.quantity * oi.unit_price) AS revenue
+FROM books b
 INNER JOIN order_items oi
-  ON o.id = oi.order_id
-WHERE o.status NOT IN ('refunded','cancelled')
-  AND o.order_date >= CURRENT_DATE
-      - INTERVAL '12 months'
-GROUP BY 1 ORDER BY 1`}
+  ON b.id = oi.book_id
+INNER JOIN orders o
+  ON oi.order_id = o.id
+WHERE o.status IN ('shipped','delivered')
+  AND o.order_date >= CURDATE()
+      - INTERVAL 12 MONTH
+GROUP BY b.genre ORDER BY revenue DESC`}
                     </pre>
                   </div>
                 </div>
