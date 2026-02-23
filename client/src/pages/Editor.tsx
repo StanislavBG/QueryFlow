@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas, useSchemaVoiceContexts, useUpsertSchemaVoiceContext, useDemoBootstrap, useAnalyzeQuery, useResetAnalysis, type DemoBootstrapResult } from "@/hooks/use-sql-queries";
 import type { SqlQuery, SchemaVoiceContext } from "@shared/schema";
 import { QueryDocumentList } from "@/components/QueryDocumentList";
@@ -954,8 +955,8 @@ export default function Editor() {
 
   // --- demo state ---
   const { isSignedIn } = useAuth();
+  const queryClient = useQueryClient();
   const demoMutation = useDemoBootstrap();
-  const [autoAnalyze, setAutoAnalyze] = useState(false);
   const [demoQuery, setDemoQuery] = useState<SqlQuery | null>(null);
   const isDemoActive = demoQuery !== null;
   const showOnboarding = !isSignedIn && !isDemoActive;
@@ -963,7 +964,6 @@ export default function Editor() {
   // --- analysis state (lifted here so it survives tab switches) ---
   const { progress: analysisProgress, ...analyzeMutation } = useAnalyzeQuery();
   const resetAnalysisMutation = useResetAnalysis();
-  const autoAnalyzeTriggered = useRef(false);
 
   // --- landing page modals ---
   const [showTos, setShowTos] = useState(false);
@@ -978,7 +978,6 @@ export default function Editor() {
       if (isDemoActive) {
         setDemoQuery(null);
         setCurrentContent("");
-        setAutoAnalyze(false);
       }
     }
     prevSignedIn.current = isSignedIn;
@@ -1070,11 +1069,24 @@ export default function Editor() {
         setDemoQuery(virtualQuery);
         setSelectedQueryId(null); // no real DB query selected
         setCurrentContent(virtualQuery.content);
-        // Delay auto-analyze slightly to let state settle
-        setTimeout(() => setAutoAnalyze(true), 500);
+
+        // Update workspace tab title to the demo query name
+        setTabs(prev => prev.map(tab =>
+          tab.id === activeTabId
+            ? { ...tab, title: result.query.title }
+            : tab
+        ));
+
+        // Seed React Query caches with pre-generated analysis — no LLM calls needed
+        if (result.feedback && result.feedback.length > 0) {
+          queryClient.setQueryData(["feedback", DEMO_QUERY_ID], result.feedback);
+        }
+        if (result.waterfall) {
+          queryClient.setQueryData(["waterfall-data", DEMO_QUERY_ID], result.waterfall);
+        }
       },
     });
-  }, [demoMutation]);
+  }, [demoMutation, queryClient, activeTabId]);
 
   // Effective query: demo takes priority, then DB-selected query
   const effectiveQuery = isDemoActive ? demoQuery : selectedQuery;
@@ -1091,18 +1103,6 @@ export default function Editor() {
       analyzeMutation.mutate({ queryId: effectiveQueryId, dialect: detectedDialect, content: resolvedQueryContent });
     }
   }, [effectiveQueryId, detectedDialect, resolvedQueryContent]);
-
-  // Auto-trigger analysis when requested (e.g., after demo bootstrap)
-  useEffect(() => {
-    if (autoAnalyze && effectiveQueryId && resolvedQueryContent?.trim() && !analyzeMutation.isPending && !autoAnalyzeTriggered.current) {
-      autoAnalyzeTriggered.current = true;
-      analyzeMutation.mutate({ queryId: effectiveQueryId, dialect: detectedDialect, content: resolvedQueryContent });
-      setAutoAnalyze(false);
-    }
-    if (!autoAnalyze) {
-      autoAnalyzeTriggered.current = false;
-    }
-  }, [autoAnalyze, effectiveQueryId, resolvedQueryContent]);
 
   // Prepare schema data for VisualExplorer (needs column names as strings)
   const schemaData = useMemo(() => {

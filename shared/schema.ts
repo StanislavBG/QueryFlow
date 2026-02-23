@@ -190,6 +190,8 @@ export const demoVersions = pgTable("demo_versions", {
   schemaTables: jsonb("schema_tables").$type<ParsedTable[]>().default([]),
   queryTitle: varchar("query_title", { length: 255 }).notNull(),
   queryContent: text("query_content").notNull(),
+  feedbackData: jsonb("feedback_data").$type<QueryFeedbackRow[]>().default([]),
+  waterfallData: jsonb("waterfall_data").$type<WaterfallAnalysis | null>(),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

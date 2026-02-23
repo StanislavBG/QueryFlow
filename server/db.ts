@@ -125,6 +125,9 @@ export async function ensureTables(): Promise<void> {
         created_at TIMESTAMP DEFAULT NOW()
       );
 
+      ALTER TABLE demo_versions ADD COLUMN IF NOT EXISTS feedback_data JSONB DEFAULT '[]';
+      ALTER TABLE demo_versions ADD COLUMN IF NOT EXISTS waterfall_data JSONB DEFAULT NULL;
+
       CREATE TABLE IF NOT EXISTS schema_voice_context (
         id SERIAL PRIMARY KEY,
         user_id VARCHAR(255),

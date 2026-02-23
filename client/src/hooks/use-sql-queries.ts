@@ -268,6 +268,8 @@ export function useResetAnalysis() {
 export interface DemoBootstrapResult {
   query: { title: string; content: string };
   schema: { name: string; ddl: string; tables: unknown[] };
+  feedback: QueryFeedbackRow[];
+  waterfall: import("@shared/waterfall").WaterfallAnalysis | null;
 }
 
 export function useDemoBootstrap() {
@@ -327,12 +329,12 @@ export function useWaterfallData(queryId: number | null | undefined) {
   return useQuery<import("@shared/waterfall").WaterfallAnalysis | null>({
     queryKey: ["waterfall-data", queryId],
     queryFn: async () => {
-      if (!queryId) return null;
+      if (!queryId || queryId <= 0) return null;
       const res = await fetch(buildUrl(api.waterfall.get.path, { id: queryId }));
       if (!res.ok) return null;
       return res.json();
     },
-    enabled: !!queryId,
+    enabled: !!queryId && queryId > 0,
   });
 }
 
