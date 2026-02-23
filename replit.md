@@ -54,8 +54,8 @@ Preferred communication style: Simple, everyday language.
   - `POST /api/sql-queries/waterfall-analysis` — LLM-based waterfall flow analysis: decomposes SQL into a DAG of source tables, CTEs, temp tables, and final output with data-flow edges. Accepts optional `queryId` to merge new analysis with user-evolved data
   - `GET /api/sql-queries/:id/waterfall` — Get stored waterfall analysis for a query
   - `PUT /api/sql-queries/:id/waterfall` — Save user-modified waterfall analysis data
-  - `POST /api/demo/bootstrap` — Return a random pre-seeded demo version (schema + flawed query). No auth required, no DB writes to sql_queries/user_schemas
-  - `POST /api/demo/seed` — Admin-only: generate and store one demo version (up to 10 total)
+  - `POST /api/demo/bootstrap` — Return the pre-seeded demo version (schema + flawed query + pre-generated feedback + waterfall). No auth required, no DB writes, zero LLM calls per visitor
+  - `POST /api/demo/seed` — Admin-only: generate and store the single Bookstore demo scenario with pre-generated analysis feedback and waterfall data
 
 ### Data Storage
 - **Database**: PostgreSQL via `DATABASE_URL` environment variable
@@ -72,7 +72,7 @@ Preferred communication style: Simple, everyday language.
   - `chat_messages` — Persisted AI chat conversation history
   - `app_users` — Clerk-synced user records with roles (admin/user)
   - `activity_events` — Behavioral analytics events with metadata JSONB
-  - `demo_versions` — Pre-generated demo content (schema DDL + flawed query) for fast, cost-free demo bootstrap (up to 10 versions)
+  - `demo_versions` — Pre-generated demo content (schema DDL + flawed query + feedback_data JSONB + waterfall_data JSONB) for fast, cost-free demo bootstrap with instant analysis display
 
 ### Build System
 - **Development**: `npm run dev` — tsx runs server which sets up Vite dev server with HMR

@@ -1403,37 +1403,26 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
   });
 
   // ─── Demo Bootstrap ────────────────────────────────────────────────
-  // Returns a pre-seeded demo version (schema + flawed query) without
-  // writing anything to sql_queries or user_schemas. Fast and cost-free.
+  // Returns a pre-seeded demo version (schema + flawed query + pre-generated
+  // analysis feedback + waterfall) without writing anything to sql_queries
+  // or user_schemas. Fast, cost-free, zero LLM calls per visitor.
 
   app.post("/api/demo/bootstrap", async (req, res) => {
     try {
-      // Pick a random pre-seeded demo version
-      let demo = await storage.getRandomDemoVersion();
+      const demo = await storage.getRandomDemoVersion();
 
       if (!demo) {
-        // Fallback: no seeded versions yet — generate one and store it
-        if (!isLLMConfigured()) {
-          return res.status(503).json({
-            message: "No demo versions available and LLM not configured.",
-          });
-        }
-        const randomIdx = Math.floor(Math.random() * DEMO_SCENARIO_COUNT);
-        const generated = await llmGenerateDemo(randomIdx);
-        const scenarioName = getDemoScenarioName(randomIdx);
-        demo = await storage.createDemoVersion({
-          schemaName: `${scenarioName} (Demo)`,
-          schemaDdl: generated.schema.ddl,
-          schemaTables: generated.schema.tables,
-          queryTitle: generated.query.title,
-          queryContent: generated.query.content,
+        return res.status(503).json({
+          message: "No demo versions available. An admin needs to run /api/demo/seed first.",
         });
       }
 
-      // Return demo data without creating any sql_queries/user_schemas rows
+      // Return demo data including pre-generated analysis
       res.json({
         query: { title: demo.queryTitle, content: demo.queryContent },
         schema: { name: demo.schemaName, ddl: demo.schemaDdl, tables: demo.schemaTables },
+        feedback: demo.feedbackData ?? [],
+        waterfall: demo.waterfallData ?? null,
       });
     } catch (err) {
       console.error("Demo bootstrap failed:", err);
@@ -1444,7 +1433,8 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
   });
 
   // ─── Demo Seed (admin-only) ───────────────────────────────────────
-  // Deletes all existing demos and regenerates all 5 scenarios.
+  // Deletes all existing demos and regenerates the single Bookstore scenario
+  // with pre-generated analysis feedback and waterfall data.
 
   app.post("/api/demo/seed", requireAdmin, async (req, res) => {
     if (!isLLMConfigured()) {
@@ -1458,26 +1448,68 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
       const deleted = await storage.deleteAllDemoVersions();
       console.log(`Deleted ${deleted} old demo versions.`);
 
-      // Generate all 5 scenarios sequentially
-      const results: string[] = [];
-      for (let i = 0; i < DEMO_SCENARIO_COUNT; i++) {
-        const name = getDemoScenarioName(i);
-        console.log(`Generating demo ${i + 1}/${DEMO_SCENARIO_COUNT}: ${name}...`);
-        const generated = await llmGenerateDemo(i);
-        await storage.createDemoVersion({
-          schemaName: `${name} (Demo)`,
-          schemaDdl: generated.schema.ddl,
-          schemaTables: generated.schema.tables,
-          queryTitle: generated.query.title,
-          queryContent: generated.query.content,
+      // Generate the single Bookstore scenario
+      const name = getDemoScenarioName(0);
+      console.log(`Generating demo: ${name}...`);
+      const generated = await llmGenerateDemo(0);
+
+      // Pre-generate analysis feedback
+      console.log("Running LLM analysis on demo query...");
+      const llmResults = await llmAnalyzeQuery(generated.query.content, {
+        dialect: "MySQL",
+      });
+
+      console.log("Validating demo recommendations...");
+      const validated = await llmValidateRecommendations(
+        generated.query.content,
+        llmResults,
+        "MySQL"
+      );
+
+      const feedbackData = validated.map((r, idx) => {
+        const { agentType, severity, title, message, suggestion, lineNumber, ...extra } = r;
+        return {
+          id: -(idx + 1),
+          queryId: -1,
+          agentType,
+          severity,
+          title,
+          message,
+          suggestion: suggestion ?? null,
+          lineNumber: lineNumber ?? null,
+          metadata: Object.keys(extra).length > 0 ? extra : {},
+          isResolved: false,
+          isDismissed: false,
+          createdAt: new Date(),
+        };
+      });
+
+      // Pre-generate waterfall analysis
+      console.log("Generating demo waterfall...");
+      let waterfallData: WaterfallAnalysis | null = null;
+      try {
+        waterfallData = await llmAnalyzeWaterfall(generated.query.content, {
+          dialect: "MySQL",
         });
-        results.push(name);
+      } catch (wfErr) {
+        console.warn("Waterfall generation failed (non-fatal):", wfErr);
       }
 
+      // Store everything including pre-generated analysis
+      await storage.createDemoVersion({
+        schemaName: `${name} (Demo)`,
+        schemaDdl: generated.schema.ddl,
+        schemaTables: generated.schema.tables,
+        queryTitle: generated.query.title,
+        queryContent: generated.query.content,
+        feedbackData,
+        waterfallData,
+      });
+
       res.json({
-        message: `Regenerated ${results.length} demo scenarios.`,
+        message: `Regenerated 1 demo scenario with pre-generated analysis.`,
         deleted,
-        scenarios: results,
+        scenarios: [name],
       });
     } catch (err) {
       console.error("Demo seed failed:", err);
