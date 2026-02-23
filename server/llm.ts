@@ -941,17 +941,17 @@ Edge types: "join" (JOIN), "create_insert" (CREATE/INSERT INTO SELECT), "cte_def
 Rules:
 - stepIndex: 0 for source tables, increment for each transformation layer. Same stepIndex = side-by-side.
 - For JOINs of N sources into 1 destination: one edge per source, same sqlStatement.
-- sqlStatement: verbatim SQL from input for that data movement.
-- joinDetails: for JOIN edges only, the ON condition.
+- sqlStatement: MUST be the FULL, COMPLETE, UNTRUNCATED verbatim SQL from the user's input that corresponds to that data movement. Copy the ENTIRE relevant clause — never abbreviate, never use "...", never summarize, never replace parts with ellipsis or placeholders. Include every column, condition, and expression exactly as written. This is critical — the user needs to see and verify the exact SQL.
+- joinDetails: for JOIN edges only, the ON condition (also full and verbatim).
 - IDs: "node_0","node_1"... and "edge_0","edge_1"...
 - Every node must have at least one edge.
 
 Return ONLY JSON:
-{"nodes":[{"id":"node_0","name":"tbl","nodeType":"source_table","columns":["c1"],"stepIndex":0}],"edges":[{"id":"edge_0","fromNodeId":"node_0","toNodeId":"node_1","edgeType":"join","sqlStatement":"SELECT...","joinDetails":"JOIN ON..."}],"summary":"brief description"}`;
+{"nodes":[...],"edges":[...],"summary":"brief description"}`;
 
   const response = await ai.chat.completions.create({
     model: MODEL,
-    max_tokens: 8192,
+    max_tokens: 16384,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: sql },
