@@ -17,11 +17,12 @@ import {
   Info,
   X,
   Pencil,
-  Trash2,
-  Plus,
-  Check,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
-import { useWaterfallData, useSaveWaterfallData } from "@/hooks/use-sql-queries";
+import { useWaterfallData } from "@/hooks/use-sql-queries";
 import type {
   WaterfallAnalysis,
   WaterfallNode,
@@ -30,19 +31,6 @@ import type {
   WaterfallNodeType,
   MergeConflict,
 } from "@shared/waterfall";
-
-// ---------------------------------------------------------------------------
-// Updater interface — exposed to parent for cross-component editing
-// ---------------------------------------------------------------------------
-
-export interface WaterfallUpdaters {
-  updateNode: (nodeId: string, updates: Partial<WaterfallNode>) => void;
-  deleteNode: (nodeId: string) => void;
-  addNode: (node: Omit<WaterfallNode, "id">) => void;
-  updateEdge: (edgeId: string, updates: Partial<WaterfallEdge>) => void;
-  deleteEdge: (edgeId: string) => void;
-  addEdge: (edge: Omit<WaterfallEdge, "id">) => void;
-}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -59,7 +47,6 @@ export interface VisualExplorerProps {
   onEdgeSelect?: (edge: WaterfallEdge | null) => void;
   selectedEdgeId?: string | null;
   onAnalysisComplete?: (analysis: WaterfallAnalysis | null) => void;
-  updaterRef?: React.MutableRefObject<WaterfallUpdaters | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -273,260 +260,6 @@ const NODE_STYLES: Record<WaterfallNodeType, NodeStyle> = {
   },
 };
 
-const NODE_TYPE_OPTIONS: { value: WaterfallNodeType; label: string }[] = [
-  { value: "source_table", label: "Source Table" },
-  { value: "cte", label: "CTE" },
-  { value: "temp_table", label: "Temp Table" },
-  { value: "derived_table", label: "Derived Table" },
-  { value: "final_output", label: "Final Output" },
-];
-
-// ---------------------------------------------------------------------------
-// Node edit popover
-// ---------------------------------------------------------------------------
-
-function NodeEditPopover({
-  node,
-  position,
-  onSave,
-  onDelete,
-  onClose,
-}: {
-  node: WaterfallNode;
-  position: NodePosition;
-  onSave: (updates: Partial<WaterfallNode>) => void;
-  onDelete: () => void;
-  onClose: () => void;
-}) {
-  const [name, setName] = useState(node.name);
-  const [nodeType, setNodeType] = useState<WaterfallNodeType>(node.nodeType);
-  const [columnsText, setColumnsText] = useState(
-    (node.columns ?? []).join("\n")
-  );
-  const [stepIndex, setStepIndex] = useState(String(node.stepIndex));
-
-  const handleSave = () => {
-    const columns = columnsText
-      .split("\n")
-      .map((c) => c.trim())
-      .filter(Boolean);
-    onSave({
-      name: name.trim() || node.name,
-      nodeType,
-      columns: columns.length > 0 ? columns : undefined,
-      stepIndex: parseInt(stepIndex, 10) || node.stepIndex,
-      userModified: true,
-    });
-    onClose();
-  };
-
-  return (
-    <div
-      className="absolute z-40 bg-popover border border-border rounded-lg shadow-xl p-3 w-64"
-      style={{
-        left: position.x + position.width + 12,
-        top: position.y,
-      }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold text-foreground">Edit Node</span>
-        <button onClick={onClose} className="p-0.5 rounded hover:bg-muted">
-          <X className="w-3 h-3 text-muted-foreground" />
-        </button>
-      </div>
-
-      <div className="space-y-2">
-        <div>
-          <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-            Name
-          </label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full mt-0.5 px-2 py-1 text-xs font-mono bg-muted border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </div>
-
-        <div>
-          <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-            Type
-          </label>
-          <select
-            value={nodeType}
-            onChange={(e) => setNodeType(e.target.value as WaterfallNodeType)}
-            className="w-full mt-0.5 px-2 py-1 text-xs bg-muted border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            {NODE_TYPE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-            Step
-          </label>
-          <input
-            type="number"
-            min={0}
-            value={stepIndex}
-            onChange={(e) => setStepIndex(e.target.value)}
-            className="w-full mt-0.5 px-2 py-1 text-xs bg-muted border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </div>
-
-        <div>
-          <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-            Columns (one per line)
-          </label>
-          <textarea
-            value={columnsText}
-            onChange={(e) => setColumnsText(e.target.value)}
-            rows={4}
-            className="w-full mt-0.5 px-2 py-1 text-xs font-mono bg-muted border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-          />
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between mt-3 pt-2 border-t border-border">
-        <button
-          onClick={onDelete}
-          className="flex items-center gap-1 text-[10px] text-destructive hover:underline"
-        >
-          <Trash2 className="w-3 h-3" />
-          Delete
-        </button>
-        <button
-          onClick={handleSave}
-          className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90"
-        >
-          <Check className="w-3 h-3" />
-          Save
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Add node dialog
-// ---------------------------------------------------------------------------
-
-function AddNodeDialog({
-  maxStepIndex,
-  existingNodes,
-  onAdd,
-  onClose,
-}: {
-  maxStepIndex: number;
-  existingNodes: WaterfallNode[];
-  onAdd: (node: Omit<WaterfallNode, "id">) => void;
-  onClose: () => void;
-}) {
-  const [name, setName] = useState("");
-  const [nodeType, setNodeType] = useState<WaterfallNodeType>("source_table");
-  const [stepIndex, setStepIndex] = useState("0");
-  const [columnsText, setColumnsText] = useState("");
-
-  const handleAdd = () => {
-    if (!name.trim()) return;
-    const columns = columnsText
-      .split("\n")
-      .map((c) => c.trim())
-      .filter(Boolean);
-    onAdd({
-      name: name.trim(),
-      nodeType,
-      stepIndex: parseInt(stepIndex, 10) || 0,
-      columns: columns.length > 0 ? columns : undefined,
-      userModified: true,
-    });
-    onClose();
-  };
-
-  return (
-    <div className="mx-4 mt-2 mb-1 bg-popover border border-border rounded-lg shadow-lg p-3">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold text-foreground">Add Node</span>
-        <button onClick={onClose} className="p-0.5 rounded hover:bg-muted">
-          <X className="w-3 h-3 text-muted-foreground" />
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-            Name
-          </label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="table_name"
-            className="w-full mt-0.5 px-2 py-1 text-xs font-mono bg-muted border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </div>
-        <div>
-          <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-            Type
-          </label>
-          <select
-            value={nodeType}
-            onChange={(e) => setNodeType(e.target.value as WaterfallNodeType)}
-            className="w-full mt-0.5 px-2 py-1 text-xs bg-muted border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            {NODE_TYPE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-            Step (0–{maxStepIndex + 1})
-          </label>
-          <input
-            type="number"
-            min={0}
-            value={stepIndex}
-            onChange={(e) => setStepIndex(e.target.value)}
-            className="w-full mt-0.5 px-2 py-1 text-xs bg-muted border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </div>
-        <div>
-          <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-            Columns (comma-sep)
-          </label>
-          <input
-            type="text"
-            value={columnsText}
-            onChange={(e) => setColumnsText(e.target.value)}
-            placeholder="col1, col2"
-            className="w-full mt-0.5 px-2 py-1 text-xs font-mono bg-muted border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </div>
-      </div>
-
-      <div className="flex justify-end mt-2">
-        <button
-          onClick={handleAdd}
-          disabled={!name.trim()}
-          className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50"
-        >
-          <Plus className="w-3 h-3" />
-          Add Node
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
@@ -534,18 +267,12 @@ function WaterfallNodeCard({
   node,
   position,
   isHighlighted,
-  isSelected,
   registerRef,
-  onClick,
-  onDelete,
 }: {
   node: WaterfallNode;
   position: NodePosition;
   isHighlighted: boolean;
-  isSelected: boolean;
   registerRef: (id: string, el: HTMLDivElement | null) => void;
-  onClick: () => void;
-  onDelete: () => void;
 }) {
   const style = NODE_STYLES[node.nodeType] || NODE_STYLES.source_table;
   const Icon = style.icon;
@@ -554,14 +281,12 @@ function WaterfallNodeCard({
   return (
     <div
       ref={(el) => registerRef(node.id, el)}
-      className={`absolute rounded-lg border-2 bg-card shadow-sm transition-all duration-200 group ${
+      className={`absolute rounded-lg border-2 bg-card shadow-sm transition-all duration-200 ${
         isShadow
           ? "opacity-30 border-dashed border-muted-foreground/30"
-          : isSelected
-            ? `${style.borderClass} shadow-md ring-2 ring-primary/40`
-            : isHighlighted
-              ? `${style.borderClass} shadow-md ring-1 ring-primary/20`
-              : "border-border hover:border-primary/30 hover:shadow-md cursor-pointer"
+          : isHighlighted
+            ? `${style.borderClass} shadow-md ring-1 ring-primary/20`
+            : "border-border"
       } ${node.nodeType === "final_output" && !isShadow ? "border-2" : ""}`}
       style={{
         left: position.x,
@@ -570,7 +295,6 @@ function WaterfallNodeCard({
         minHeight: position.height,
         pointerEvents: isShadow ? "none" : undefined,
       }}
-      onClick={isShadow ? undefined : onClick}
     >
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/50 rounded-t-lg">
@@ -587,19 +311,6 @@ function WaterfallNodeCard({
         >
           {isShadow ? "REF" : style.badgeLabel}
         </Badge>
-        {/* Delete button — visible on hover */}
-        {!isShadow && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-destructive/10 transition-opacity"
-            title="Delete node"
-          >
-            <Trash2 className="w-3 h-3 text-destructive/60" />
-          </button>
-        )}
       </div>
 
       {/* Columns */}
@@ -849,6 +560,11 @@ function MergeConflictsBanner({
 // Main component
 // ---------------------------------------------------------------------------
 
+// Zoom constants
+const ZOOM_STEP = 0.1;
+const MIN_ZOOM = 0.3;
+const MAX_ZOOM = 2.0;
+
 export function VisualExplorer({
   queryContent,
   queryId,
@@ -857,7 +573,6 @@ export function VisualExplorer({
   onEdgeSelect,
   selectedEdgeId,
   onAnalysisComplete,
-  updaterRef,
 }: VisualExplorerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const nodeRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -865,17 +580,15 @@ export function VisualExplorer({
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<WaterfallAnalysis | null>(null);
 
-  // Editing state
-  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
-  const [showAddNode, setShowAddNode] = useState(false);
+  // Zoom & fullscreen state
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Merge conflict state
   const [mergeConflicts, setMergeConflicts] = useState<MergeConflict[]>([]);
   const [mergeNewNodes, setMergeNewNodes] = useState<string[]>([]);
   const [mergeRemovedNodes, setMergeRemovedNodes] = useState<string[]>([]);
   const [showMergeBanner, setShowMergeBanner] = useState(false);
-
-  const saveWaterfallMutation = useSaveWaterfallData();
 
   // Load stored waterfall data for this query
   const { data: storedWaterfall, isLoading: isLoadingWaterfall } = useWaterfallData(queryId);
@@ -885,8 +598,6 @@ export function VisualExplorer({
   useEffect(() => {
     if (queryId !== prevQueryIdRef.current) {
       setAnalysis(null);
-      setEditingNodeId(null);
-      setShowAddNode(false);
       setShowMergeBanner(false);
       prevQueryIdRef.current = queryId;
     }
@@ -900,7 +611,7 @@ export function VisualExplorer({
     }
   }, [storedWaterfall]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Observe container width
+  // Observe container width (account for zoom when laying out)
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -913,6 +624,16 @@ export function VisualExplorer({
     return () => observer.disconnect();
   }, []);
 
+  // Close fullscreen on Escape
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFullscreen(false);
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [isFullscreen]);
+
   const registerNodeRef = useCallback(
     (id: string, el: HTMLDivElement | null) => {
       if (el) {
@@ -924,137 +645,6 @@ export function VisualExplorer({
     []
   );
 
-  // ─── Analysis mutation helpers ───────────────────────────────────
-
-  const persistAnalysis = useCallback(
-    (updated: WaterfallAnalysis) => {
-      setAnalysis(updated);
-      onAnalysisComplete?.(updated);
-      if (queryId && queryId > 0) {
-        saveWaterfallMutation.mutate({ queryId, analysis: updated });
-      }
-    },
-    [queryId, saveWaterfallMutation, onAnalysisComplete]
-  );
-
-  // ─── CRUD operations ─────────────────────────────────────────────
-
-  const updateNode = useCallback(
-    (nodeId: string, updates: Partial<WaterfallNode>) => {
-      if (!analysis) return;
-      const updated = {
-        ...analysis,
-        nodes: analysis.nodes.map((n) =>
-          n.id === nodeId ? { ...n, ...updates, userModified: true } : n
-        ),
-      };
-      persistAnalysis(updated);
-    },
-    [analysis, persistAnalysis]
-  );
-
-  const deleteNode = useCallback(
-    (nodeId: string) => {
-      if (!analysis) return;
-      const updated = {
-        ...analysis,
-        nodes: analysis.nodes.filter((n) => n.id !== nodeId),
-        edges: analysis.edges.filter(
-          (e) => e.fromNodeId !== nodeId && e.toNodeId !== nodeId
-        ),
-      };
-      persistAnalysis(updated);
-      setEditingNodeId(null);
-    },
-    [analysis, persistAnalysis]
-  );
-
-  const addNode = useCallback(
-    (node: Omit<WaterfallNode, "id">) => {
-      if (!analysis) return;
-      const maxId = analysis.nodes.reduce((max, n) => {
-        const num = parseInt(n.id.replace("node_", ""), 10);
-        return isNaN(num) ? max : Math.max(max, num);
-      }, -1);
-      const newNode: WaterfallNode = { ...node, id: `node_${maxId + 1}` };
-      const updated = {
-        ...analysis,
-        nodes: [...analysis.nodes, newNode],
-      };
-      persistAnalysis(updated);
-    },
-    [analysis, persistAnalysis]
-  );
-
-  const updateEdge = useCallback(
-    (edgeId: string, updates: Partial<WaterfallEdge>) => {
-      if (!analysis) return;
-      const updated = {
-        ...analysis,
-        edges: analysis.edges.map((e) =>
-          e.id === edgeId ? { ...e, ...updates, userModified: true } : e
-        ),
-      };
-      persistAnalysis(updated);
-      // Also update the selected edge in the parent if it changed
-      const updatedEdge = updated.edges.find((e) => e.id === edgeId);
-      if (updatedEdge && selectedEdgeId === edgeId) {
-        onEdgeSelect?.(updatedEdge);
-      }
-    },
-    [analysis, persistAnalysis, selectedEdgeId, onEdgeSelect]
-  );
-
-  const deleteEdge = useCallback(
-    (edgeId: string) => {
-      if (!analysis) return;
-      const updated = {
-        ...analysis,
-        edges: analysis.edges.filter((e) => e.id !== edgeId),
-      };
-      persistAnalysis(updated);
-      if (selectedEdgeId === edgeId) {
-        onEdgeSelect?.(null);
-      }
-    },
-    [analysis, persistAnalysis, selectedEdgeId, onEdgeSelect]
-  );
-
-  const addEdge = useCallback(
-    (edge: Omit<WaterfallEdge, "id">) => {
-      if (!analysis) return;
-      const maxId = analysis.edges.reduce((max, e) => {
-        const num = parseInt(e.id.replace("edge_", ""), 10);
-        return isNaN(num) ? max : Math.max(max, num);
-      }, -1);
-      const newEdge: WaterfallEdge = { ...edge, id: `edge_${maxId + 1}` };
-      const updated = {
-        ...analysis,
-        edges: [...analysis.edges, newEdge],
-      };
-      persistAnalysis(updated);
-    },
-    [analysis, persistAnalysis]
-  );
-
-  // ─── Expose updaters to parent via ref ────────────────────────────
-
-  useEffect(() => {
-    if (updaterRef) {
-      updaterRef.current = {
-        updateNode,
-        deleteNode,
-        addNode,
-        updateEdge,
-        deleteEdge,
-        addEdge,
-      };
-    }
-    return () => {
-      if (updaterRef) updaterRef.current = null;
-    };
-  }, [updaterRef, updateNode, deleteNode, addNode, updateEdge, deleteEdge, addEdge]);
-
   // ─── Display transforms ──────────────────────────────────────────
 
   const displayAnalysis = useMemo(() => {
@@ -1062,10 +652,13 @@ export function VisualExplorer({
     return addShadowNodes(analysis);
   }, [analysis]);
 
+  // Use unscaled container width for layout so nodes don't shrink
+  const layoutWidth = useMemo(() => containerWidth / zoomLevel, [containerWidth, zoomLevel]);
+
   const positions = useMemo(() => {
     if (!displayAnalysis) return new Map<string, NodePosition>();
-    return layoutWaterfall(displayAnalysis, containerWidth);
-  }, [displayAnalysis, containerWidth]);
+    return layoutWaterfall(displayAnalysis, layoutWidth);
+  }, [displayAnalysis, layoutWidth]);
 
   const nodeMap = useMemo(() => {
     const map = new Map<string, WaterfallNode>();
@@ -1081,11 +674,6 @@ export function VisualExplorer({
     if (!displayAnalysis) return 0;
     return displayAnalysis.nodes.filter((n) => !n.isShadow).length;
   }, [displayAnalysis]);
-
-  const maxStepIndex = useMemo(() => {
-    if (!analysis) return 0;
-    return Math.max(0, ...analysis.nodes.map((n) => n.stepIndex));
-  }, [analysis]);
 
   const diagramHeight = useMemo(() => {
     let maxY = 0;
@@ -1122,34 +710,33 @@ export function VisualExplorer({
   const handleEdgeClick = useCallback(
     (edge: WaterfallEdge) => {
       onEdgeSelect?.(edge);
-      setEditingNodeId(null);
     },
     [onEdgeSelect]
   );
 
-  const handleNodeClick = useCallback(
-    (nodeId: string) => {
-      setEditingNodeId((prev) => (prev === nodeId ? null : nodeId));
-      setShowAddNode(false);
-    },
-    []
-  );
+  const handleZoomIn = useCallback(() => {
+    setZoomLevel((z) => Math.min(MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)));
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setZoomLevel((z) => Math.max(MIN_ZOOM, +(z - ZOOM_STEP).toFixed(2)));
+  }, []);
+
+  const handleToggleFullscreen = useCallback(() => {
+    setIsFullscreen((v) => !v);
+  }, []);
 
   // Empty state
   if (!queryContent.trim() && !analysis) {
     return <WaterfallEmptyState />;
   }
 
-  // Find the node being edited (from the raw analysis, not display)
-  const editingNode = editingNodeId && analysis
-    ? analysis.nodes.find((n) => n.id === editingNodeId)
-    : null;
-  const editingNodePos = editingNodeId ? positions.get(editingNodeId) : null;
+  const zoomPercent = Math.round(zoomLevel * 100);
 
-  return (
-    <div className="flex flex-col h-full">
+  const content = (
+    <div className={`flex flex-col ${isFullscreen ? "h-screen" : "h-full"}`}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card flex-shrink-0">
         <div className="flex items-center gap-2">
           <Database className="w-4 h-4 text-primary" />
           <span className="text-xs font-semibold text-foreground">
@@ -1170,16 +757,42 @@ export function VisualExplorer({
               </Badge>
             </>
           )}
-          {analysis && (
+
+          {/* Zoom controls */}
+          <div className="flex items-center gap-0.5 border border-border rounded-md">
             <button
-              onClick={() => { setShowAddNode((v) => !v); setEditingNodeId(null); }}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-border hover:bg-accent/50 transition-colors"
-              title="Add node"
+              onClick={handleZoomOut}
+              disabled={zoomLevel <= MIN_ZOOM}
+              className="p-1 hover:bg-accent/50 transition-colors disabled:opacity-30 rounded-l-md"
+              title="Zoom out"
             >
-              <Plus className="w-3 h-3" />
-              Node
+              <ZoomOut className="w-3.5 h-3.5 text-muted-foreground" />
             </button>
-          )}
+            <span className="text-[10px] font-mono text-muted-foreground px-1 min-w-[36px] text-center select-none">
+              {zoomPercent}%
+            </span>
+            <button
+              onClick={handleZoomIn}
+              disabled={zoomLevel >= MAX_ZOOM}
+              className="p-1 hover:bg-accent/50 transition-colors disabled:opacity-30 rounded-r-md"
+              title="Zoom in"
+            >
+              <ZoomIn className="w-3.5 h-3.5 text-muted-foreground" />
+            </button>
+          </div>
+
+          {/* Fullscreen toggle */}
+          <button
+            onClick={handleToggleFullscreen}
+            className="p-1 rounded-md border border-border hover:bg-accent/50 transition-colors"
+            title={isFullscreen ? "Exit full screen" : "Full screen"}
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-3.5 h-3.5 text-muted-foreground" />
+            ) : (
+              <Maximize2 className="w-3.5 h-3.5 text-muted-foreground" />
+            )}
+          </button>
         </div>
       </div>
 
@@ -1192,16 +805,6 @@ export function VisualExplorer({
             newNodes={mergeNewNodes}
             removedNodes={mergeRemovedNodes}
             onDismiss={() => setShowMergeBanner(false)}
-          />
-        )}
-
-        {/* Add node inline form */}
-        {showAddNode && analysis && (
-          <AddNodeDialog
-            maxStepIndex={maxStepIndex}
-            existingNodes={analysis.nodes}
-            onAdd={addNode}
-            onClose={() => setShowAddNode(false)}
           />
         )}
 
@@ -1218,9 +821,9 @@ export function VisualExplorer({
               No visual yet
             </h3>
             <p className="text-xs text-muted-foreground max-w-[280px]">
-              Click <strong>Analyze</strong> on the Analysis tab to generate
-              both feedback and a waterfall showing how data flows from source
-              tables through transformations to the final output.
+              Click <strong>Analyze</strong> to generate both feedback and a
+              waterfall showing how data flows from source tables through
+              transformations to the final output.
             </p>
           </div>
         )}
@@ -1228,7 +831,10 @@ export function VisualExplorer({
         {displayAnalysis && (
           <div
             className="relative p-4"
-            style={{ minHeight: Math.max(diagramHeight, 200), zIndex: 0 }}
+            style={{
+              minHeight: Math.max(diagramHeight * zoomLevel, 200),
+              zIndex: 0,
+            }}
           >
             {/* Loading overlay */}
             {isLoadingWaterfall && (
@@ -1240,63 +846,69 @@ export function VisualExplorer({
               </div>
             )}
 
-            {/* SVG edge overlay */}
-            <WaterfallEdgeOverlay
-              edges={displayAnalysis.edges}
-              positions={positions}
-              nodeMap={nodeMap}
-              hoveredEdgeId={hoveredEdgeId}
-              selectedEdgeId={selectedEdgeId ?? null}
-              onHover={handleEdgeHover}
-              onClick={handleEdgeClick}
-            />
-
-            {/* Node cards */}
-            {displayAnalysis.nodes.map((node) => {
-              const pos = positions.get(node.id);
-              if (!pos) return null;
-              return (
-                <WaterfallNodeCard
-                  key={node.id}
-                  node={node}
-                  position={pos}
-                  isHighlighted={highlightedNodeIds.has(node.id)}
-                  isSelected={editingNodeId === node.id}
-                  registerRef={registerNodeRef}
-                  onClick={() => handleNodeClick(node.id)}
-                  onDelete={() => deleteNode(node.id)}
-                />
-              );
-            })}
-
-            {/* Node edit popover */}
-            {editingNode && editingNodePos && (
-              <NodeEditPopover
-                node={editingNode}
-                position={editingNodePos}
-                onSave={(updates) => updateNode(editingNode.id, updates)}
-                onDelete={() => deleteNode(editingNode.id)}
-                onClose={() => setEditingNodeId(null)}
+            {/* Zoomable diagram wrapper */}
+            <div
+              style={{
+                transform: `scale(${zoomLevel})`,
+                transformOrigin: "top left",
+                width: `${100 / zoomLevel}%`,
+              }}
+            >
+              {/* SVG edge overlay */}
+              <WaterfallEdgeOverlay
+                edges={displayAnalysis.edges}
+                positions={positions}
+                nodeMap={nodeMap}
+                hoveredEdgeId={hoveredEdgeId}
+                selectedEdgeId={selectedEdgeId ?? null}
+                onHover={handleEdgeHover}
+                onClick={handleEdgeClick}
               />
-            )}
 
-            {/* Summary */}
-            {displayAnalysis.summary && (
-              <div
-                className="absolute left-1/2 -translate-x-1/2 text-center max-w-md"
-                style={{
-                  top: diagramHeight + 8,
-                  zIndex: 2,
-                }}
-              >
-                <p className="text-[11px] text-muted-foreground italic">
-                  {displayAnalysis.summary}
-                </p>
-              </div>
-            )}
+              {/* Node cards */}
+              {displayAnalysis.nodes.map((node) => {
+                const pos = positions.get(node.id);
+                if (!pos) return null;
+                return (
+                  <WaterfallNodeCard
+                    key={node.id}
+                    node={node}
+                    position={pos}
+                    isHighlighted={highlightedNodeIds.has(node.id)}
+                    registerRef={registerNodeRef}
+                  />
+                );
+              })}
+
+              {/* Summary */}
+              {displayAnalysis.summary && (
+                <div
+                  className="absolute left-1/2 -translate-x-1/2 text-center max-w-md"
+                  style={{
+                    top: diagramHeight + 8,
+                    zIndex: 2,
+                  }}
+                >
+                  <p className="text-[11px] text-muted-foreground italic">
+                    {displayAnalysis.summary}
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
     </div>
   );
+
+  // Fullscreen: render as a fixed overlay
+  if (isFullscreen) {
+    return (
+      <div className="fixed inset-0 z-50 bg-background">
+        {content}
+      </div>
+    );
+  }
+
+  return content;
 }

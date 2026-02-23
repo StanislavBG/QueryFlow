@@ -11,7 +11,7 @@ import { QueryOnboarding } from "@/components/QueryOnboarding";
 import { SchemaTreePanel, normalizeTables } from "@/components/SchemaModule";
 import type { SchemaSelection } from "@/components/SchemaModule";
 import { SchemaDetailView } from "@/components/SchemaDetailView";
-import { VisualExplorer, type WaterfallUpdaters } from "@/components/VisualExplorer";
+import { VisualExplorer } from "@/components/VisualExplorer";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, Plus, X, Boxes, Shield, Play, PlayCircle, Sparkles, AlertCircle, Mic, Key, Columns3, Lock, ExternalLink, Scale, Terminal, Trash2, Copy, ChevronDown, ChevronUp, Pencil } from "lucide-react";
+import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, Plus, X, Boxes, Shield, Play, PlayCircle, Sparkles, AlertCircle, Mic, Key, Columns3, Lock, ExternalLink, Scale, Terminal, Trash2, Copy, ChevronDown, ChevronUp } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -854,22 +854,10 @@ function SqlHighlighted({ sql }: { sql: string }) {
 function WaterfallDetailPanel({
   selectedEdge,
   analysis,
-  onUpdateEdge,
-  onDeleteEdge,
 }: {
   selectedEdge: import("@shared/waterfall").WaterfallEdge | null;
   analysis: import("@shared/waterfall").WaterfallAnalysis | null;
-  onUpdateEdge?: (edgeId: string, updates: Partial<import("@shared/waterfall").WaterfallEdge>) => void;
-  onDeleteEdge?: (edgeId: string) => void;
 }) {
-  const [editingField, setEditingField] = useState<"sql" | "join" | null>(null);
-  const [editValue, setEditValue] = useState("");
-
-  // Reset editing state when selected edge changes
-  useEffect(() => {
-    setEditingField(null);
-  }, [selectedEdge?.id]);
-
   if (!selectedEdge || !analysis) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground px-6 text-center">
@@ -887,23 +875,6 @@ function WaterfallDetailPanel({
   const toNode = analysis.nodes.find((n) => n.id === selectedEdge.toNodeId);
   const edgeMeta = EDGE_TYPE_LABELS[selectedEdge.edgeType] || EDGE_TYPE_LABELS.select_from;
 
-  const startEdit = (field: "sql" | "join") => {
-    setEditingField(field);
-    setEditValue(
-      field === "sql" ? selectedEdge.sqlStatement : (selectedEdge.joinDetails || "")
-    );
-  };
-
-  const saveEdit = () => {
-    if (!editingField || !onUpdateEdge) return;
-    const updates: Partial<import("@shared/waterfall").WaterfallEdge> =
-      editingField === "sql"
-        ? { sqlStatement: editValue }
-        : { joinDetails: editValue || undefined };
-    onUpdateEdge(selectedEdge.id, updates);
-    setEditingField(null);
-  };
-
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -915,15 +886,6 @@ function WaterfallDetailPanel({
           >
             {edgeMeta.label}
           </Badge>
-          {onDeleteEdge && (
-            <button
-              onClick={() => onDeleteEdge(selectedEdge.id)}
-              className="flex items-center gap-1 text-[10px] text-destructive/60 hover:text-destructive transition-colors"
-              title="Delete this edge"
-            >
-              <Trash2 className="w-3 h-3" />
-            </button>
-          )}
         </div>
         <div className="flex items-center gap-2 text-xs">
           <span className="font-mono font-semibold text-foreground">
@@ -933,99 +895,26 @@ function WaterfallDetailPanel({
           <span className="font-mono font-semibold text-foreground">
             {toNode?.name || "?"}
           </span>
-          {selectedEdge.userModified && (
-            <span className="text-[9px] text-muted-foreground/50 italic ml-auto">modified</span>
-          )}
         </div>
       </div>
 
-      {/* SQL statement */}
+      {/* SQL statement (read-only) */}
       <div className="flex-1 overflow-auto p-4">
-        {(selectedEdge.joinDetails || editingField === "join") && (
+        {selectedEdge.joinDetails && (
           <div className="mb-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Join Condition
-              </h4>
-              {onUpdateEdge && editingField !== "join" && (
-                <button
-                  onClick={() => startEdit("join")}
-                  className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
-                >
-                  <Pencil className="w-2.5 h-2.5" /> Edit
-                </button>
-              )}
+            <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+              Join Condition
+            </h4>
+            <div className="bg-muted/50 rounded-lg px-3 py-2 border border-border">
+              <SqlHighlighted sql={selectedEdge.joinDetails} />
             </div>
-            {editingField === "join" ? (
-              <div className="space-y-1.5">
-                <textarea
-                  value={editValue}
-                  onChange={(e) => setEditValue(e.target.value)}
-                  rows={4}
-                  className="w-full px-3 py-2 text-xs font-mono bg-muted border border-primary/30 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-                  autoFocus
-                />
-                <div className="flex justify-end gap-1.5">
-                  <button
-                    onClick={() => setEditingField(null)}
-                    className="px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={saveEdit}
-                    className="px-2 py-0.5 text-[10px] font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90"
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-muted/50 rounded-lg px-3 py-2 border border-border">
-                <SqlHighlighted sql={selectedEdge.joinDetails!} />
-              </div>
-            )}
           </div>
         )}
 
-        <div className="flex items-center justify-between mb-1.5">
-          <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-            SQL Statement
-          </h4>
-          {onUpdateEdge && editingField !== "sql" && (
-            <button
-              onClick={() => startEdit("sql")}
-              className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
-            >
-              <Pencil className="w-2.5 h-2.5" /> Edit
-            </button>
-          )}
-        </div>
-        {editingField === "sql" ? (
-          <div className="space-y-1.5">
-            <textarea
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              rows={10}
-              className="w-full px-3 py-2 text-xs font-mono bg-muted border border-primary/30 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-              autoFocus
-            />
-            <div className="flex justify-end gap-1.5">
-              <button
-                onClick={() => setEditingField(null)}
-                className="px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveEdit}
-                className="px-2 py-0.5 text-[10px] font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        ) : selectedEdge.sqlStatement ? (
+        <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+          SQL Statement
+        </h4>
+        {selectedEdge.sqlStatement ? (
           <div className="bg-muted/50 rounded-lg p-3 border border-border overflow-auto max-h-[60vh]">
             <SqlHighlighted sql={selectedEdge.sqlStatement} />
           </div>
@@ -1100,7 +989,6 @@ export default function Editor() {
   // Waterfall flow state (for visual sub-tab in right panel)
   const [waterfallAnalysis, setWaterfallAnalysis] = useState<import("@shared/waterfall").WaterfallAnalysis | null>(null);
   const [selectedWaterfallEdge, setSelectedWaterfallEdge] = useState<import("@shared/waterfall").WaterfallEdge | null>(null);
-  const waterfallUpdaterRef = useRef<WaterfallUpdaters | null>(null);
 
   // Right panel sub-tab (Analysis vs Visual) — only applies when activeTab.type === "query"
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("analysis");
@@ -1812,7 +1700,6 @@ GROUP BY 1 ORDER BY 1`}
                           onEdgeSelect={setSelectedWaterfallEdge}
                           selectedEdgeId={selectedWaterfallEdge?.id ?? null}
                           onAnalysisComplete={setWaterfallAnalysis}
-                          updaterRef={waterfallUpdaterRef}
                         />
                       </div>
                       {selectedWaterfallEdge && (
@@ -1820,12 +1707,6 @@ GROUP BY 1 ORDER BY 1`}
                           <WaterfallDetailPanel
                             selectedEdge={selectedWaterfallEdge}
                             analysis={waterfallAnalysis}
-                            onUpdateEdge={(edgeId, updates) =>
-                              waterfallUpdaterRef.current?.updateEdge(edgeId, updates)
-                            }
-                            onDeleteEdge={(edgeId) =>
-                              waterfallUpdaterRef.current?.deleteEdge(edgeId)
-                            }
                           />
                         </div>
                       )}
