@@ -1011,23 +1011,9 @@ export default function Editor() {
   // --- left sidebar tab (contextual to workspace tab type) ---
   type LeftTabKey = "queries" | "ask" | "schemas";
 
-  const leftTabOptions: LeftTabKey[] = useMemo(() => {
-    switch (activeTab.type) {
-      case "query":
-        return ["queries", "ask"];
-      case "schemas":
-        return ["schemas"];
-    }
-  }, [activeTab.type]);
+  const leftTabOptions: LeftTabKey[] = ["schemas", "queries", "ask"];
 
   const [leftTab, setLeftTab] = useState<LeftTabKey>("queries");
-
-  // Reset left tab when workspace tab type changes
-  useEffect(() => {
-    if (!leftTabOptions.includes(leftTab)) {
-      setLeftTab(leftTabOptions[0]);
-    }
-  }, [leftTabOptions, leftTab]);
 
   // Auto-select first query if none selected
   useEffect(() => {
@@ -1479,7 +1465,10 @@ GROUP BY 1 ORDER BY 1`}
                 {leftTab === "schemas" && (
                   <SchemaTreePanel
                     selection={schemaSelection}
-                    onSelect={setSchemaSelection}
+                    onSelect={(sel) => {
+                      setSchemaSelection(sel);
+                      if (sel) addTab("schemas");
+                    }}
                   />
                 )}
               </div>
@@ -1491,93 +1480,51 @@ GROUP BY 1 ORDER BY 1`}
           {/* Center panel – workspace tab bar + content */}
           <ResizablePanel defaultSize={52} minSize={30}>
             <div className="h-full flex flex-col">
-              {/* Workspace tab bar */}
-              <div className="flex items-center border-b border-border bg-card flex-shrink-0">
-                {/* Left: query tabs + "+" button */}
-                <div className="flex items-center overflow-x-auto flex-1 min-w-0">
-                  {tabs.filter((t) => t.type === "query").map((tab) => {
-                    const isActive = tab.id === activeTabId;
-                    return (
-                      <button
-                        key={tab.id}
-                        onClick={() => setActiveTabId(tab.id)}
-                        className={`group relative flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 text-xs font-medium border-r border-border whitespace-nowrap transition-colors ${
-                          isActive
-                            ? "bg-background text-foreground"
-                            : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50"
-                        }`}
-                      >
-                        <FileCode2 className="w-3 h-3 flex-shrink-0" />
-                        <span>{tab.title}</span>
-                        {tabs.length > 1 && (
-                          <span
-                            role="button"
-                            onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
-                            className="ml-1 p-0.5 rounded hover:bg-muted-foreground/20 opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            <X className="w-2.5 h-2.5" />
-                          </span>
-                        )}
-                        {isActive && (
-                          <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
-                        )}
-                      </button>
-                    );
-                  })}
+              {/* Workspace tab bar — single row of active tabs + "+" */}
+              <div className="flex items-center border-b border-border bg-card flex-shrink-0 overflow-x-auto">
+                {tabs.map((tab) => {
+                  const isActive = tab.id === activeTabId;
+                  const TabIcon = TAB_ICON[tab.type] || FileCode2;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTabId(tab.id)}
+                      className={`group relative flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 text-xs font-medium border-r border-border whitespace-nowrap transition-colors ${
+                        isActive
+                          ? "bg-background text-foreground"
+                          : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                      }`}
+                    >
+                      <TabIcon className="w-3 h-3 flex-shrink-0" />
+                      <span>{tab.title}</span>
+                      {tabs.length > 1 && (
+                        <span
+                          role="button"
+                          onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
+                          className="ml-1 p-0.5 rounded hover:bg-muted-foreground/20 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </span>
+                      )}
+                      {isActive && (
+                        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+                      )}
+                    </button>
+                  );
+                })}
 
-                  {/* + new query tab */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => addTab("query")}
-                        className="flex items-center justify-center w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors flex-shrink-0"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom"><p className="text-xs">New query tab</p></TooltipContent>
-                  </Tooltip>
-                </div>
-
-                {/* Right: pinned singleton tabs */}
-                <div className="flex items-center border-l border-border flex-shrink-0">
-                  {(["schemas"] as const).map((type) => {
-                    const isActive = activeTab.type === type;
-                    const tab = tabs.find((t) => t.type === type);
-                    return (
-                      <Tooltip key={type}>
-                        <TooltipTrigger asChild>
-                          <button
-                            onClick={() => addTab(type)}
-                            className={`relative flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
-                              isActive
-                                ? "bg-background text-foreground"
-                                : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent/50"
-                            }`}
-                          >
-                            <Table2 className="w-3 h-3 flex-shrink-0" />
-                            <span>Schemas</span>
-                            {tab && tabs.length > 1 && (
-                              <span
-                                role="button"
-                                onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
-                                className="ml-1 p-0.5 rounded hover:bg-muted-foreground/20 opacity-0 group-hover:opacity-100 transition-opacity"
-                              >
-                                <X className="w-2.5 h-2.5" />
-                              </span>
-                            )}
-                            {isActive && (
-                              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
-                            )}
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">
-                          <p className="text-xs">ERD & schema definitions</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    );
-                  })}
-                </div>
+                {/* + new query tab */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => addTab("query")}
+                      className="flex items-center justify-center w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors flex-shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom"><p className="text-xs">New query tab</p></TooltipContent>
+                </Tooltip>
               </div>
 
               {/* Workspace tab content */}
