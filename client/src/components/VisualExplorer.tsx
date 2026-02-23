@@ -136,36 +136,125 @@ function layoutWaterfall(
   analysis: WaterfallAnalysis,
   containerWidth: number
 ): Map<string, NodePosition> {
+  // Build adjacency maps for barycenter ordering
+  const childrenOf = new Map<string, string[]>();
+  const parentsOf = new Map<string, string[]>();
+  for (const edge of analysis.edges) {
+    if (!childrenOf.has(edge.fromNodeId)) childrenOf.set(edge.fromNodeId, []);
+    childrenOf.get(edge.fromNodeId)!.push(edge.toNodeId);
+    if (!parentsOf.has(edge.toNodeId)) parentsOf.set(edge.toNodeId, []);
+    parentsOf.get(edge.toNodeId)!.push(edge.fromNodeId);
+  }
+
+  // Group nodes by tier (stepIndex)
   const tiers = new Map<number, WaterfallNode[]>();
   for (const node of analysis.nodes) {
     const tier = tiers.get(node.stepIndex) || [];
     tier.push(node);
     tiers.set(node.stepIndex, tier);
   }
-
   const sortedTierKeys = Array.from(tiers.keys()).sort((a, b) => a - b);
-  const positions = new Map<string, NodePosition>();
 
-  sortedTierKeys.forEach((tierKey, tierIndex) => {
-    const nodesInTier = tiers.get(tierKey)!;
+  // Helper: place nodes in a tier and update the positions map
+  function placeTier(
+    nodes: WaterfallNode[],
+    y: number,
+    pos: Map<string, NodePosition>
+  ) {
     const totalWidth =
-      nodesInTier.length * NODE_WIDTH +
-      (nodesInTier.length - 1) * NODE_GAP_X;
-    const startX = Math.max(
-      TOP_PADDING,
-      (containerWidth - totalWidth) / 2
-    );
-    const y = tierIndex * (NODE_MIN_HEIGHT + TIER_GAP_Y) + TOP_PADDING;
-
-    nodesInTier.forEach((node, nodeIndex) => {
-      positions.set(node.id, {
-        x: startX + nodeIndex * (NODE_WIDTH + NODE_GAP_X),
+      nodes.length * NODE_WIDTH + (nodes.length - 1) * NODE_GAP_X;
+    const startX = Math.max(TOP_PADDING, (containerWidth - totalWidth) / 2);
+    nodes.forEach((node, idx) => {
+      pos.set(node.id, {
+        x: startX + idx * (NODE_WIDTH + NODE_GAP_X),
         y,
         width: NODE_WIDTH,
         height: NODE_MIN_HEIGHT,
       });
     });
+  }
+
+  // Initial placement (preserves input order)
+  const positions = new Map<string, NodePosition>();
+  sortedTierKeys.forEach((tierKey, tierIndex) => {
+    const nodesInTier = tiers.get(tierKey)!;
+    const y = tierIndex * (NODE_MIN_HEIGHT + TIER_GAP_Y) + TOP_PADDING;
+    placeTier(nodesInTier, y, positions);
   });
+
+  // Barycenter refinement: 3 iterations of down-pass + up-pass
+  // to minimize edge crossings and total line length
+  for (let iter = 0; iter < 3; iter++) {
+    // Down pass: order each tier by average X of parent nodes
+    for (let i = 1; i < sortedTierKeys.length; i++) {
+      const tierKey = sortedTierKeys[i];
+      const nodesInTier = [...tiers.get(tierKey)!];
+      const y = positions.get(nodesInTier[0]?.id)?.y ?? 0;
+
+      nodesInTier.sort((a, b) => {
+        const aParents = parentsOf.get(a.id) || [];
+        const bParents = parentsOf.get(b.id) || [];
+        const aBC =
+          aParents.length > 0
+            ? aParents.reduce((s, pid) => {
+                const p = positions.get(pid);
+                return s + (p ? p.x + p.width / 2 : 0);
+              }, 0) / aParents.length
+            : Infinity;
+        const bBC =
+          bParents.length > 0
+            ? bParents.reduce((s, pid) => {
+                const p = positions.get(pid);
+                return s + (p ? p.x + p.width / 2 : 0);
+              }, 0) / bParents.length
+            : Infinity;
+        if (aBC === Infinity && bBC === Infinity)
+          return a.name.localeCompare(b.name);
+        return aBC - bBC;
+      });
+
+      tiers.set(tierKey, nodesInTier);
+      placeTier(nodesInTier, y, positions);
+    }
+
+    // Up pass: order each tier by average X of child nodes
+    // Shadow nodes are always pushed to the right
+    for (let i = sortedTierKeys.length - 2; i >= 0; i--) {
+      const tierKey = sortedTierKeys[i];
+      const nodesInTier = [...tiers.get(tierKey)!];
+      const y = positions.get(nodesInTier[0]?.id)?.y ?? 0;
+
+      nodesInTier.sort((a, b) => {
+        // Shadow nodes always go to the right
+        const aShadow = a.isShadow ? 1 : 0;
+        const bShadow = b.isShadow ? 1 : 0;
+        if (aShadow !== bShadow) return aShadow - bShadow;
+
+        const aChildren = childrenOf.get(a.id) || [];
+        const bChildren = childrenOf.get(b.id) || [];
+        const aBC =
+          aChildren.length > 0
+            ? aChildren.reduce((s, cid) => {
+                const p = positions.get(cid);
+                return s + (p ? p.x + p.width / 2 : 0);
+              }, 0) / aChildren.length
+            : Infinity;
+        const bBC =
+          bChildren.length > 0
+            ? bChildren.reduce((s, cid) => {
+                const p = positions.get(cid);
+                return s + (p ? p.x + p.width / 2 : 0);
+              }, 0) / bChildren.length
+            : Infinity;
+        if (aBC === Infinity && bBC === Infinity)
+          return a.name.localeCompare(b.name);
+        return aBC - bBC;
+      });
+
+      tiers.set(tierKey, nodesInTier);
+      placeTier(nodesInTier, y, positions);
+    }
+  }
 
   return positions;
 }
@@ -260,6 +349,215 @@ const NODE_STYLES: Record<WaterfallNodeType, NodeStyle> = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Edge path computation — anchor distribution + collision avoidance
+// ---------------------------------------------------------------------------
+
+interface EdgePath {
+  path: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  labelX: number;
+  labelY: number;
+}
+
+function computeAllEdgePaths(
+  edges: WaterfallEdge[],
+  positions: Map<string, NodePosition>
+): Map<string, EdgePath> {
+  const result = new Map<string, EdgePath>();
+
+  // --- Anchor distribution ---
+  // Group edges by source (bottom) and target (top) node
+  const bottomGroups = new Map<string, WaterfallEdge[]>();
+  const topGroups = new Map<string, WaterfallEdge[]>();
+
+  for (const edge of edges) {
+    if (!positions.has(edge.fromNodeId) || !positions.has(edge.toNodeId))
+      continue;
+    if (!bottomGroups.has(edge.fromNodeId))
+      bottomGroups.set(edge.fromNodeId, []);
+    bottomGroups.get(edge.fromNodeId)!.push(edge);
+    if (!topGroups.has(edge.toNodeId)) topGroups.set(edge.toNodeId, []);
+    topGroups.get(edge.toNodeId)!.push(edge);
+  }
+
+  const ANCHOR_PAD = 24;
+  const fromAnchor = new Map<string, { x: number; y: number }>();
+  const toAnchor = new Map<string, { x: number; y: number }>();
+
+  // Distribute bottom anchors: sort by target X, spread across node width
+  for (const [nodeId, group] of bottomGroups) {
+    const pos = positions.get(nodeId)!;
+    const sorted = [...group].sort((a, b) => {
+      const aPos = positions.get(a.toNodeId);
+      const bPos = positions.get(b.toNodeId);
+      return (
+        (aPos ? aPos.x + aPos.width / 2 : 0) -
+        (bPos ? bPos.x + bPos.width / 2 : 0)
+      );
+    });
+    const count = sorted.length;
+    for (let i = 0; i < count; i++) {
+      const t = count === 1 ? 0.5 : i / (count - 1);
+      fromAnchor.set(sorted[i].id, {
+        x: pos.x + ANCHOR_PAD + t * (pos.width - 2 * ANCHOR_PAD),
+        y: pos.y + pos.height,
+      });
+    }
+  }
+
+  // Distribute top anchors: sort by source X, spread across node width
+  for (const [nodeId, group] of topGroups) {
+    const pos = positions.get(nodeId)!;
+    const sorted = [...group].sort((a, b) => {
+      const aPos = positions.get(a.fromNodeId);
+      const bPos = positions.get(b.fromNodeId);
+      return (
+        (aPos ? aPos.x + aPos.width / 2 : 0) -
+        (bPos ? bPos.x + bPos.width / 2 : 0)
+      );
+    });
+    const count = sorted.length;
+    for (let i = 0; i < count; i++) {
+      const t = count === 1 ? 0.5 : i / (count - 1);
+      toAnchor.set(sorted[i].id, {
+        x: pos.x + ANCHOR_PAD + t * (pos.width - 2 * ANCHOR_PAD),
+        y: pos.y,
+      });
+    }
+  }
+
+  // --- Path computation with collision avoidance ---
+  for (const edge of edges) {
+    const fromPos = positions.get(edge.fromNodeId);
+    const toPos = positions.get(edge.toNodeId);
+    if (!fromPos || !toPos) continue;
+
+    const from = fromAnchor.get(edge.id) || {
+      x: fromPos.x + fromPos.width / 2,
+      y: fromPos.y + fromPos.height,
+    };
+    const to = toAnchor.get(edge.id) || {
+      x: toPos.x + toPos.width / 2,
+      y: toPos.y,
+    };
+    const x1 = from.x;
+    const y1 = from.y;
+    const x2 = to.x;
+    const y2 = to.y;
+
+    // Default label position
+    let labelX = (x1 + x2) / 2;
+    let labelY = (y1 + y2) / 2;
+
+    // For edges going upward or to the same tier, just use a simple S-curve
+    if (y2 <= y1) {
+      const midY = (y1 + y2) / 2;
+      result.set(edge.id, {
+        path: `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`,
+        x1, y1, x2, y2, labelX, labelY,
+      });
+      continue;
+    }
+
+    // Collect intermediate obstacles (boxes between source and target tiers)
+    const obstacles: NodePosition[] = [];
+    for (const [nodeId, pos] of positions) {
+      if (nodeId === edge.fromNodeId || nodeId === edge.toNodeId) continue;
+      // Box overlaps vertically with the edge corridor
+      if (pos.y + pos.height > y1 + 2 && pos.y < y2 - 2) {
+        obstacles.push(pos);
+      }
+    }
+
+    if (obstacles.length === 0) {
+      const midY = (y1 + y2) / 2;
+      result.set(edge.id, {
+        path: `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`,
+        x1, y1, x2, y2, labelX, labelY,
+      });
+      continue;
+    }
+
+    // Sample the default Bézier to check for actual collisions
+    const midY = (y1 + y2) / 2;
+    const BOX_PAD = 12;
+    const collidingBoxes = obstacles.filter((box) => {
+      for (let s = 0; s <= 24; s++) {
+        const t = s / 24;
+        const mt = 1 - t;
+        // Cubic Bézier: P0=(x1,y1) P1=(x1,midY) P2=(x2,midY) P3=(x2,y2)
+        const sx =
+          mt * mt * mt * x1 +
+          3 * mt * mt * t * x1 +
+          3 * mt * t * t * x2 +
+          t * t * t * x2;
+        const sy =
+          mt * mt * mt * y1 +
+          3 * mt * mt * t * midY +
+          3 * mt * t * t * midY +
+          t * t * t * y2;
+        if (
+          sx >= box.x - BOX_PAD &&
+          sx <= box.x + box.width + BOX_PAD &&
+          sy >= box.y - BOX_PAD &&
+          sy <= box.y + box.height + BOX_PAD
+        ) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    if (collidingBoxes.length === 0) {
+      result.set(edge.id, {
+        path: `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`,
+        x1, y1, x2, y2, labelX, labelY,
+      });
+      continue;
+    }
+
+    // Route around colliding boxes using waypoints
+    collidingBoxes.sort((a, b) => a.y - b.y);
+    const CLEARANCE = 24;
+    const waypoints: { x: number; y: number }[] = [];
+
+    for (const box of collidingBoxes) {
+      const leftX = box.x - CLEARANCE;
+      const rightX = box.x + box.width + CLEARANCE;
+      // Choose the side that minimizes total horizontal detour
+      const distLeft = Math.abs(x1 - leftX) + Math.abs(x2 - leftX);
+      const distRight = Math.abs(x1 - rightX) + Math.abs(x2 - rightX);
+      const routeX = distLeft <= distRight ? leftX : rightX;
+      waypoints.push({ x: routeX, y: box.y + box.height / 2 });
+    }
+
+    // Build a smooth multi-segment cubic Bézier path through waypoints
+    const points = [{ x: x1, y: y1 }, ...waypoints, { x: x2, y: y2 }];
+    let path = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 1; i < points.length; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      const my = (prev.y + curr.y) / 2;
+      path += ` C ${prev.x} ${my}, ${curr.x} ${my}, ${curr.x} ${curr.y}`;
+    }
+
+    // Place label at the midpoint of the middle segment
+    const midSegIdx = Math.floor(points.length / 2);
+    const segA = points[midSegIdx - 1] || points[0];
+    const segB = points[midSegIdx] || points[points.length - 1];
+    labelX = (segA.x + segB.x) / 2;
+    labelY = (segA.y + segB.y) / 2;
+
+    result.set(edge.id, { path, x1, y1, x2, y2, labelX, labelY });
+  }
+
+  return result;
+}
+
 // Sub-components
 // ---------------------------------------------------------------------------
 
@@ -352,6 +650,13 @@ function WaterfallEdgeOverlay({
   onHover: (edge: WaterfallEdge | null) => void;
   onClick: (edge: WaterfallEdge) => void;
 }) {
+  // Pre-compute all edge paths with anchor distribution and collision avoidance
+  // (must be called before the early return to satisfy React hooks rules)
+  const edgePaths = useMemo(
+    () => computeAllEdgePaths(edges, positions),
+    [edges, positions]
+  );
+
   if (edges.length === 0) return null;
 
   let maxY = 0;
@@ -396,20 +701,12 @@ function WaterfallEdgeOverlay({
       </defs>
 
       {edges.map((edge) => {
-        const fromPos = positions.get(edge.fromNodeId);
-        const toPos = positions.get(edge.toNodeId);
-        if (!fromPos || !toPos) return null;
+        const pathInfo = edgePaths.get(edge.id);
+        if (!pathInfo) return null;
 
         const isActive =
           hoveredEdgeId === edge.id || selectedEdgeId === edge.id;
         const edgeStyle = EDGE_STYLES[edge.edgeType] || EDGE_STYLES.select_from;
-
-        const x1 = fromPos.x + fromPos.width / 2;
-        const y1 = fromPos.y + fromPos.height;
-        const x2 = toPos.x + toPos.width / 2;
-        const y2 = toPos.y;
-        const midY = (y1 + y2) / 2;
-        const path = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
 
         const fromNode = nodeMap.get(edge.fromNodeId);
         const toNode = nodeMap.get(edge.toNodeId);
@@ -417,7 +714,7 @@ function WaterfallEdgeOverlay({
         return (
           <g key={edge.id}>
             <path
-              d={path}
+              d={pathInfo.path}
               fill="none"
               stroke="transparent"
               strokeWidth={20}
@@ -427,7 +724,7 @@ function WaterfallEdgeOverlay({
               onClick={() => onClick(edge)}
             />
             <path
-              d={path}
+              d={pathInfo.path}
               fill="none"
               stroke={isActive ? edgeStyle.hoverColor : edgeStyle.color}
               strokeWidth={isActive ? 2.5 : 1.5}
@@ -437,8 +734,8 @@ function WaterfallEdgeOverlay({
             />
             {fromNode && toNode && (
               <foreignObject
-                x={(x1 + x2) / 2 - 100}
-                y={midY - 14}
+                x={pathInfo.labelX - 100}
+                y={pathInfo.labelY - 14}
                 width={200}
                 height={28}
                 className="pointer-events-none"
