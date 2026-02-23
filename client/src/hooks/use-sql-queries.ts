@@ -247,6 +247,22 @@ export function useDismissFeedback() {
   });
 }
 
+export function useResetAnalysis() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, { queryId: number }>({
+    mutationFn: async ({ queryId }) => {
+      const res = await fetch(buildUrl(api.feedback.resetAnalysis.path, { id: queryId }), {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to reset analysis");
+    },
+    onSuccess: (_, { queryId }) => {
+      queryClient.invalidateQueries({ queryKey: ["feedback", queryId] });
+      queryClient.invalidateQueries({ queryKey: ["waterfall-data", queryId] });
+    },
+  });
+}
+
 // ─── Demo Bootstrap ──────────────────────────────────────────────────
 
 export interface DemoBootstrapResult {

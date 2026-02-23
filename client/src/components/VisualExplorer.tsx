@@ -21,6 +21,7 @@ import {
   ZoomOut,
   Maximize2,
   Minimize2,
+  Code2,
 } from "lucide-react";
 import { useWaterfallData } from "@/hooks/use-sql-queries";
 import type {
@@ -121,6 +122,9 @@ function addShadowNodes(analysis: WaterfallAnalysis): WaterfallAnalysis {
 
 const NODE_WIDTH = 220;
 const NODE_MIN_HEIGHT = 64;
+const NODE_HEADER_HEIGHT = 36;
+const NODE_COLUMN_ROW_HEIGHT = 18;
+const NODE_COLUMN_SECTION_PAD = 12;
 const TIER_GAP_Y = 180;
 const NODE_GAP_X = 40;
 const TOP_PADDING = 24;
@@ -130,6 +134,20 @@ interface NodePosition {
   y: number;
   width: number;
   height: number;
+}
+
+/** Estimate rendered height of a node card based on its columns. */
+function estimateNodeHeight(node: WaterfallNode): number {
+  if (node.isShadow || !node.columns || node.columns.length === 0) {
+    return NODE_MIN_HEIGHT;
+  }
+  const visibleCols = Math.min(node.columns.length, 6);
+  const hasMore = node.columns.length > 6;
+  const colRows = visibleCols + (hasMore ? 1 : 0);
+  return Math.max(
+    NODE_MIN_HEIGHT,
+    NODE_HEADER_HEIGHT + NODE_COLUMN_SECTION_PAD + colRows * NODE_COLUMN_ROW_HEIGHT
+  );
 }
 
 function layoutWaterfall(
@@ -169,17 +187,24 @@ function layoutWaterfall(
         x: startX + idx * (NODE_WIDTH + NODE_GAP_X),
         y,
         width: NODE_WIDTH,
-        height: NODE_MIN_HEIGHT,
+        height: estimateNodeHeight(node),
       });
     });
   }
 
-  // Initial placement (preserves input order)
+  // Initial placement — use max estimated height per tier for Y spacing
   const positions = new Map<string, NodePosition>();
+  let cumulativeY = TOP_PADDING;
   sortedTierKeys.forEach((tierKey, tierIndex) => {
     const nodesInTier = tiers.get(tierKey)!;
-    const y = tierIndex * (NODE_MIN_HEIGHT + TIER_GAP_Y) + TOP_PADDING;
-    placeTier(nodesInTier, y, positions);
+    if (tierIndex > 0) {
+      // Gap is relative to the tallest node in the PREVIOUS tier
+      const prevTierKey = sortedTierKeys[tierIndex - 1];
+      const prevNodes = tiers.get(prevTierKey)!;
+      const prevMaxH = Math.max(...prevNodes.map(estimateNodeHeight));
+      cumulativeY += prevMaxH + TIER_GAP_Y;
+    }
+    placeTier(nodesInTier, cumulativeY, positions);
   });
 
   // Barycenter refinement: 3 iterations of down-pass + up-pass
@@ -881,6 +906,9 @@ export function VisualExplorer({
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // Fullscreen-local selected edge (for the SQL panel)
+  const [fsSelectedEdge, setFsSelectedEdge] = useState<WaterfallEdge | null>(null);
+
   // Merge conflict state
   const [mergeConflicts, setMergeConflicts] = useState<MergeConflict[]>([]);
   const [mergeNewNodes, setMergeNewNodes] = useState<string[]>([]);
@@ -1006,6 +1034,7 @@ export function VisualExplorer({
 
   const handleEdgeClick = useCallback(
     (edge: WaterfallEdge) => {
+      setFsSelectedEdge((prev) => (prev?.id === edge.id ? null : edge));
       onEdgeSelect?.(edge);
     },
     [onEdgeSelect]
@@ -1198,11 +1227,65 @@ export function VisualExplorer({
     </div>
   );
 
-  // Fullscreen: render as a fixed overlay
+  // Fullscreen: render as a fixed overlay with a 1/3 SQL panel on the right
   if (isFullscreen) {
+    // Resolve the active edge (clicked or hovered) for the SQL panel
+    const activeEdge = fsSelectedEdge ?? (hoveredEdgeId && displayAnalysis
+      ? displayAnalysis.edges.find((e) => e.id === hoveredEdgeId) ?? null
+      : null);
+    const activeFromNode = activeEdge ? nodeMap.get(activeEdge.fromNodeId) : null;
+    const activeToNode = activeEdge ? nodeMap.get(activeEdge.toNodeId) : null;
+
     return (
-      <div className="fixed inset-0 z-50 bg-background">
-        {content}
+      <div className="fixed inset-0 z-50 bg-background flex">
+        {/* Waterfall — 2/3 */}
+        <div className="flex-[2] min-w-0">{content}</div>
+
+        {/* SQL panel — 1/3 */}
+        <div className="flex-1 border-l border-border bg-card flex flex-col min-w-0">
+          <div className="flex items-center gap-2 px-4 py-2 border-b border-border flex-shrink-0">
+            <Code2 className="w-4 h-4 text-primary" />
+            <span className="text-xs font-semibold text-foreground">SQL Detail</span>
+          </div>
+
+          {activeEdge ? (
+            <div className="flex-1 overflow-auto p-4 space-y-4">
+              {/* Edge summary */}
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[10px] h-5">
+                    {EDGE_STYLES[activeEdge.edgeType]?.label ?? activeEdge.edgeType}
+                  </Badge>
+                  <span className="text-[11px] text-muted-foreground">
+                    {activeFromNode?.name ?? "?"} → {activeToNode?.name ?? "?"}
+                  </span>
+                </div>
+                {activeEdge.joinDetails && (
+                  <p className="text-[11px] text-muted-foreground/80 font-mono">
+                    {activeEdge.joinDetails}
+                  </p>
+                )}
+              </div>
+
+              {/* SQL statement */}
+              <div className="space-y-1">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                  SQL Statement
+                </p>
+                <pre className="text-xs font-mono text-foreground bg-muted/50 border border-border rounded-md p-3 whitespace-pre-wrap break-words overflow-auto max-h-[calc(100vh-160px)]">
+                  {activeEdge.sqlStatement || "No SQL available"}
+                </pre>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
+              <Code2 className="w-8 h-8 text-muted-foreground/30 mb-3" />
+              <p className="text-xs text-muted-foreground">
+                Click or hover over a connection line to see its SQL statement here.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
