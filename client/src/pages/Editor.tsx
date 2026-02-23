@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas, useSchemaVoiceContexts, useUpsertSchemaVoiceContext, useDemoBootstrap, useAnalyzeQuery, type DemoBootstrapResult } from "@/hooks/use-sql-queries";
+import { useSqlQuery, useSqlQueries, useCreateSqlQuery, useUserSchemas, useSchemaVoiceContexts, useUpsertSchemaVoiceContext, useDemoBootstrap, useAnalyzeQuery, useResetAnalysis, type DemoBootstrapResult } from "@/hooks/use-sql-queries";
 import type { SqlQuery, SchemaVoiceContext } from "@shared/schema";
 import { QueryDocumentList } from "@/components/QueryDocumentList";
 import { SqlEditor } from "@/components/SqlEditor";
@@ -962,6 +962,7 @@ export default function Editor() {
 
   // --- analysis state (lifted here so it survives tab switches) ---
   const { progress: analysisProgress, ...analyzeMutation } = useAnalyzeQuery();
+  const resetAnalysisMutation = useResetAnalysis();
   const autoAnalyzeTriggered = useRef(false);
 
   // --- landing page modals ---
@@ -1598,7 +1599,31 @@ GROUP BY 1 ORDER BY 1`}
                         </button>
                       ))}
                     </div>
-                    <div className="pr-3">
+                    <div className="flex items-center gap-1.5 pr-3">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              if (effectiveQueryId) {
+                                resetAnalysisMutation.mutate({ queryId: effectiveQueryId });
+                              }
+                            }}
+                            disabled={resetAnalysisMutation.isPending || !effectiveQueryId}
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                          >
+                            {resetAnalysisMutation.isPending ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3 h-3" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">
+                          <p className="text-xs">Reset analysis — clear all insights and visual</p>
+                        </TooltipContent>
+                      </Tooltip>
                       <Button
                         size="sm"
                         onClick={handleAnalyze}

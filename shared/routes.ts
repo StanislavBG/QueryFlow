@@ -130,6 +130,14 @@ export const api = {
         404: errorSchemas.notFound,
       },
     },
+    resetAnalysis: {
+      method: 'DELETE' as const,
+      path: '/api/sql-queries/:id/analysis' as const,
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        404: errorSchemas.notFound,
+      },
+    },
   },
 
   format: {
