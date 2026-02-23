@@ -410,6 +410,25 @@ export async function registerRoutes(
     res.json({ success: true });
   });
 
+  // ─── Reset Analysis ───────────────────────────────────────────────
+  // Deletes all feedback (insights) and waterfall (visual) data for a query.
+
+  app.delete("/api/sql-queries/:id/analysis", async (req, res) => {
+    const queryId = parseInt(req.params.id, 10);
+    if (isNaN(queryId)) {
+      return res.status(400).json({ message: "Invalid query ID" });
+    }
+    const query = await storage.getSqlQuery(queryId);
+    if (!query) {
+      return res.status(404).json({ message: "Query not found" });
+    }
+    // Delete all feedback (current + accepted + dismissed)
+    await storage.deleteFeedbackByQueryId(queryId);
+    // Clear waterfall data
+    await storage.updateSqlQuery(queryId, { waterfallData: null });
+    res.json({ success: true });
+  });
+
   // ─── Analysis Context Preview ──────────────────────────────────────
   // Returns the exact context blocks that would be sent to llmAnalyzeQuery,
   // without running the LLM. Each block is a { key, label, content } object.
