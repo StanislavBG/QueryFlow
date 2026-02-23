@@ -782,17 +782,112 @@ Return a JSON object:
   };
 }
 
+// ---------------------------------------------------------------------------
+// Demo Scenarios — 5 diverse, intuitive themes any user can follow
+// ---------------------------------------------------------------------------
+
+const DEMO_SCENARIOS: Array<{
+  schemaName: string;
+  title: string;
+  theme: string;
+  tables: string;
+  mistakes: string;
+}> = [
+  {
+    schemaName: "Online Bookstore",
+    title: "Monthly Book Sales Report",
+    theme: "A small online bookstore tracking authors, books, customers, and orders.",
+    tables: `Create 5 tables:
+- **authors** — id, name, country
+- **books** — id, title, author_id (FK→authors), genre, price, published_date
+- **customers** — id, name, email, signup_date
+- **orders** — id, customer_id (FK→customers), order_date, status ('pending','shipped','delivered','cancelled','refunded')
+- **order_items** — id, order_id (FK→orders), book_id (FK→books), quantity, unit_price`,
+    mistakes: `The query should calculate monthly sales by genre and top-selling authors. Embed these 4 mistakes:
+1. **Counts cancelled/refunded orders as sales** — no WHERE filter on order status, so revenue is inflated
+2. **Missing NULL handling** — LEFT JOIN from books to order_items without COALESCE, so books with zero sales show NULL instead of 0 in arithmetic
+3. **No date range filter** — queries ALL historical data for a "monthly" report, making it slow and misleading
+4. **Division by zero** — calculates avg_revenue_per_order = total_revenue / order_count, but order_count can be 0 for some genres`,
+  },
+  {
+    schemaName: "Employee Payroll",
+    title: "Quarterly Payroll Summary by Department",
+    theme: "A company HR system with departments, employees, salaries, and bonuses.",
+    tables: `Create 5 tables:
+- **departments** — id, name, budget
+- **employees** — id, first_name, last_name, department_id (FK→departments), hire_date, is_active
+- **salaries** — id, employee_id (FK→employees), effective_date, amount
+- **bonuses** — id, employee_id (FK→employees), bonus_date, amount, reason
+- **time_off** — id, employee_id (FK→employees), start_date, end_date, type ('sick','vacation','personal')`,
+    mistakes: `The query should summarize quarterly payroll costs per department, including bonuses. Embed these 4 mistakes:
+1. **Includes terminated employees** — no filter on employees.is_active, so departed staff salaries are still counted
+2. **Wrong JOIN inflates totals** — joins salaries to bonuses without proper grouping first, causing row multiplication (cartesian product) that inflates the total payroll
+3. **Hardcoded quarter** — uses literal dates '2024-01-01' and '2024-03-31' instead of dynamic quarter boundaries
+4. **Missing NULL handling** — LEFT JOIN to bonuses without COALESCE, so departments with no bonuses produce NULL in the total_compensation sum`,
+  },
+  {
+    schemaName: "Student Grades",
+    title: "Student GPA and Course Performance Report",
+    theme: "A university system tracking students, courses, enrollments, and grades.",
+    tables: `Create 5 tables:
+- **students** — id, name, email, major, enrollment_year, is_active
+- **professors** — id, name, department
+- **courses** — id, course_name, course_code, professor_id (FK→professors), credits
+- **enrollments** — id, student_id (FK→students), course_id (FK→courses), semester, year, grade (e.g. 'A','B','C','D','F','W','I')
+- **attendance** — id, enrollment_id (FK→enrollments), class_date, status ('present','absent','late')`,
+    mistakes: `The query should calculate each student's GPA and identify students at risk of academic probation. Embed these 4 mistakes:
+1. **Counts withdrawn/incomplete grades in GPA** — no filter to exclude 'W' (withdrawn) and 'I' (incomplete) grades, which should not factor into GPA calculation
+2. **Includes inactive students** — no filter on students.is_active, so expelled or graduated students appear in the "at risk" list
+3. **Wrong GPA formula** — calculates GPA as AVG of grade points instead of the credit-weighted average (SUM(grade_points * credits) / SUM(credits)), giving misleading results
+4. **No semester filter** — computes GPA across ALL semesters instead of the current one, mixing old and new performance`,
+  },
+  {
+    schemaName: "Restaurant Orders",
+    title: "Daily Revenue and Popular Menu Items Report",
+    theme: "A restaurant POS system tracking menu items, tables, orders, and payments.",
+    tables: `Create 5 tables:
+- **menu_items** — id, name, category ('appetizer','main','dessert','drink'), price, is_available
+- **tables** — id, table_number, capacity
+- **orders** — id, table_id (FK→tables), order_time, status ('open','served','paid','voided'), server_name
+- **order_items** — id, order_id (FK→orders), menu_item_id (FK→menu_items), quantity, item_price, notes
+- **payments** — id, order_id (FK→orders), payment_method ('cash','credit','debit'), amount, tip, payment_time`,
+    mistakes: `The query should calculate daily revenue by menu category and identify the most popular items. Embed these 4 mistakes:
+1. **Counts voided orders in revenue** — no WHERE filter excluding status = 'voided', so cancelled meals inflate the daily total
+2. **Double-counts split payments** — joins orders to payments without accounting for multiple payment records per order (when customers split the bill), multiplying the order_items rows
+3. **Uses item_price from order_items but should use quantity * item_price** — the revenue SUM uses just item_price instead of quantity * item_price, undercounting when quantity > 1
+4. **No date filter** — the "daily" report has no WHERE on order_time, so it scans and sums the entire history`,
+  },
+  {
+    schemaName: "Project Tracker",
+    title: "Sprint Velocity and Bug Resolution Report",
+    theme: "A software team's project management system tracking projects, sprints, tickets, and developers.",
+    tables: `Create 5 tables:
+- **projects** — id, name, start_date, status ('active','completed','on_hold')
+- **developers** — id, name, role ('frontend','backend','fullstack','qa'), is_active
+- **sprints** — id, project_id (FK→projects), sprint_name, start_date, end_date, status ('planning','active','completed')
+- **tickets** — id, sprint_id (FK→sprints), assigned_to (FK→developers), title, type ('feature','bug','task'), status ('open','in_progress','done','wontfix'), story_points, created_at, resolved_at
+- **comments** — id, ticket_id (FK→tickets), author_id (FK→developers), content, created_at`,
+    mistakes: `The query should calculate sprint velocity (completed story points) and bug resolution time. Embed these 4 mistakes:
+1. **Counts 'wontfix' tickets as completed work** — no filter excluding status = 'wontfix' from the velocity calculation, inflating the team's throughput
+2. **Includes on_hold projects** — no filter on projects.status, so paused projects skew the velocity metrics
+3. **Wrong date diff for resolution time** — calculates bug resolution as resolved_at - created_at but doesn't filter out tickets where resolved_at IS NULL (still open bugs), causing NULL to propagate through AVG
+4. **Division by zero in velocity ratio** — calculates points_per_developer = total_points / developer_count, but some sprints may have 0 assigned developers`,
+  },
+];
+
 /**
- * Generate a demo e-commerce schema and a deliberately flawed analytical SQL
- * query for the bootstrap demo experience.
+ * Generate a demo schema and a deliberately flawed SQL query.
+ * Each scenario is a different real-world theme that is easy for any user to
+ * follow.  The query has 4 clear, realistic mistakes with enough context that
+ * the analyzer can produce detailed error descriptions and reasoning.
  *
- * Single LLM call — returns a coherent schema + query pair where the query
- * contains realistic business-analyst mistakes that the analyzer can catch.
+ * @param scenarioIndex 0-4 — picks one of 5 predefined scenarios
  */
-export async function llmGenerateDemo(): Promise<{
+export async function llmGenerateDemo(scenarioIndex: number = 0): Promise<{
   schema: { ddl: string; tables: ParsedTable[] };
   query: { title: string; content: string };
 }> {
+  const scenario = DEMO_SCENARIOS[scenarioIndex % DEMO_SCENARIOS.length];
   const openai = getClient();
 
   const response = await openai.chat.completions.create({
@@ -801,47 +896,40 @@ export async function llmGenerateDemo(): Promise<{
     messages: [
       {
         role: "user",
-        content: `You are generating a demo dataset for QueryFlow, a SQL query analyzer. Generate two things in a single JSON response:
+        content: `You are generating a demo for QueryFlow, a SQL query analyzer.
 
-## 1. E-Commerce Database Schema (7 tables)
+## Theme: "${scenario.theme}"
 
-Create a realistic online retail store schema with these tables:
-- **customers** — id, name, email, city, state, created_at, is_active
-- **categories** — id, name, parent_category_id
-- **products** — id, name, category_id (FK→categories), price, cost, stock_status, created_at, is_discontinued
-- **orders** — id, customer_id (FK→customers), order_date, status (enum: 'pending','confirmed','shipped','delivered','cancelled','refunded'), total_amount, discount_amount, shipping_cost
-- **order_items** — id, order_id (FK→orders), product_id (FK→products), quantity, unit_price, line_total
-- **returns** — id, order_id (FK→orders), order_item_id (FK→order_items), return_date, reason, refund_amount, status
-- **inventory** — id, product_id (FK→products), warehouse_id, quantity_on_hand, reorder_point, last_updated
+## 1. Database Schema
 
-Use MySQL syntax for the DDL. Include proper PRIMARY KEYs, FOREIGN KEYs, and realistic data types.
+${scenario.tables}
 
-## 2. Deliberately Flawed Analytical Query (40-60 lines)
+Use MySQL syntax for the DDL.  Include proper PRIMARY KEYs, FOREIGN KEYs, NOT NULL constraints, and realistic data types.
 
-Write a multi-CTE analytical SQL query titled "Monthly Revenue & Customer Analytics Dashboard" that a business analyst might write. It should look professional with helpful comments and meaningful aliases, but contain these **specific embedded mistakes** that the analyzer will catch:
+## 2. Deliberately Flawed Query: "${scenario.title}"
 
-1. **Inflated revenue** — The revenue SUM does NOT subtract returns/refunds, so totals are overstated
-2. **Counting cancelled orders** — No WHERE filter on order status, so cancelled and refunded orders are counted as valid sales
-3. **Wrong JOIN type** — Uses LEFT JOIN where INNER JOIN is needed (e.g., joining orders to order_items with LEFT JOIN when you only want orders WITH items), causing NULLs to propagate
-4. **SELECT * in a CTE** — Pulls all columns from the customers table unnecessarily, causing GROUP BY issues
-5. **Missing NULL handling** — No COALESCE on nullable LEFT JOIN results used in arithmetic (e.g., division or subtraction with potential NULLs)
-6. **No date range filter** — The main revenue CTE has no date boundary, scanning ALL historical data for a "monthly" report
-7. **Hardcoded year** — Uses literal '2024' in one CTE instead of YEAR(CURDATE()) or a parameter
-8. **Cartesian join risk** — A JOIN condition in the final SELECT that causes row multiplication (e.g., joining two CTEs on a non-unique key or a condition like \`cr.total_orders > 1\` instead of a proper key match)
-9. **Division by zero** — A ratio calculation (e.g., turnover_ratio = on_hand / total_sold) that will fail when the denominator is 0
+Write a SQL query (20-40 lines) that a junior analyst might realistically write.  Use clear, readable formatting with comments explaining the intent of each section.  The query should look professional but contain these specific mistakes:
 
-The query must use MySQL syntax. Make the bugs **subtle** — they should look natural, like honest mistakes a busy analyst would make. Include a header comment block with title, department, and a date.
+${scenario.mistakes}
+
+**Important rules for the query:**
+- Keep it simple enough that someone with basic SQL knowledge can follow.
+- Use MySQL syntax.
+- Add a header comment block with the title and a short description of what the report should show.
+- Add inline comments that describe the INTENT (e.g., "-- Calculate total revenue per genre") — do NOT comment on the bugs themselves.
+- Use table aliases and meaningful column names.
+- The mistakes should be subtle and look like natural oversights, not obvious errors.
 
 ## Output Format
 
-Return ONLY a JSON object with this exact structure (no markdown fences, no explanation):
+Return ONLY a JSON object (no markdown fences, no explanation):
 
 {
   "schema": {
-    "ddl": "CREATE TABLE customers (\\n  id INT AUTO_INCREMENT PRIMARY KEY,\\n  ...\\n);\\n\\nCREATE TABLE ...",
+    "ddl": "CREATE TABLE authors (\\n  id INT AUTO_INCREMENT PRIMARY KEY,\\n  ...\\n);\\n\\nCREATE TABLE ...",
     "tables": [
       {
-        "name": "customers",
+        "name": "authors",
         "columns": [
           {"name": "id", "type": "INT", "isPrimaryKey": true},
           {"name": "name", "type": "VARCHAR(100)", "isPrimaryKey": false}
@@ -851,8 +939,8 @@ Return ONLY a JSON object with this exact structure (no markdown fences, no expl
     ]
   },
   "query": {
-    "title": "Monthly Revenue & Customer Analytics Dashboard",
-    "content": "-- Monthly Revenue & Customer Analytics Dashboard\\n-- Department: Sales Analytics\\n..."
+    "title": "${scenario.title}",
+    "content": "-- ${scenario.title}\\n-- ..."
   }
 }`,
       },
@@ -903,10 +991,16 @@ Return ONLY a JSON object with this exact structure (no markdown fences, no expl
       tables,
     },
     query: {
-      title: (queryData.title as string) || "Monthly Revenue & Customer Analytics Dashboard",
+      title: (queryData.title as string) || scenario.title,
       content: queryData.content as string,
     },
   };
+}
+
+/** Expose scenario metadata so the seed endpoint knows how many exist. */
+export const DEMO_SCENARIO_COUNT = DEMO_SCENARIOS.length;
+export function getDemoScenarioName(index: number): string {
+  return DEMO_SCENARIOS[index % DEMO_SCENARIOS.length].schemaName;
 }
 
 // ---------------------------------------------------------------------------

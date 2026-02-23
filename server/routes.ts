@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
 import { formatSQL } from "./formatter";
-import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, llmGenerateQueryFromVoice, llmAnalyzeWaterfall, logLlmError, getLlmErrors, clearLlmErrors } from "./llm";
+import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, DEMO_SCENARIO_COUNT, getDemoScenarioName, llmGenerateQueryFromVoice, llmAnalyzeWaterfall, logLlmError, getLlmErrors, clearLlmErrors } from "./llm";
 import { requireAdmin, resolveAppUser, logActivity } from "./auth";
 import { mergeWaterfallAnalysis } from "./waterfall-merge";
 import type { WaterfallAnalysis } from "@shared/waterfall";
@@ -1418,9 +1418,11 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
             message: "No demo versions available and LLM not configured.",
           });
         }
-        const generated = await llmGenerateDemo();
+        const randomIdx = Math.floor(Math.random() * DEMO_SCENARIO_COUNT);
+        const generated = await llmGenerateDemo(randomIdx);
+        const scenarioName = getDemoScenarioName(randomIdx);
         demo = await storage.createDemoVersion({
-          schemaName: "Online Store (Demo)",
+          schemaName: `${scenarioName} (Demo)`,
           schemaDdl: generated.schema.ddl,
           schemaTables: generated.schema.tables,
           queryTitle: generated.query.title,
@@ -1442,7 +1444,7 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
   });
 
   // ─── Demo Seed (admin-only) ───────────────────────────────────────
-  // Generates and stores one demo version per call, up to 10 total.
+  // Deletes all existing demos and regenerates all 5 scenarios.
 
   app.post("/api/demo/seed", requireAdmin, async (req, res) => {
     if (!isLLMConfigured()) {
@@ -1451,25 +1453,35 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
       });
     }
 
-    const currentCount = await storage.getDemoVersionCount();
-    if (currentCount >= 10) {
-      return res.json({ message: "Already have 10 demo versions.", count: currentCount });
-    }
-
     try {
-      const generated = await llmGenerateDemo();
-      await storage.createDemoVersion({
-        schemaName: "Online Store (Demo)",
-        schemaDdl: generated.schema.ddl,
-        schemaTables: generated.schema.tables,
-        queryTitle: generated.query.title,
-        queryContent: generated.query.content,
+      // Delete all existing demo versions first
+      const deleted = await storage.deleteAllDemoVersions();
+      console.log(`Deleted ${deleted} old demo versions.`);
+
+      // Generate all 5 scenarios sequentially
+      const results: string[] = [];
+      for (let i = 0; i < DEMO_SCENARIO_COUNT; i++) {
+        const name = getDemoScenarioName(i);
+        console.log(`Generating demo ${i + 1}/${DEMO_SCENARIO_COUNT}: ${name}...`);
+        const generated = await llmGenerateDemo(i);
+        await storage.createDemoVersion({
+          schemaName: `${name} (Demo)`,
+          schemaDdl: generated.schema.ddl,
+          schemaTables: generated.schema.tables,
+          queryTitle: generated.query.title,
+          queryContent: generated.query.content,
+        });
+        results.push(name);
+      }
+
+      res.json({
+        message: `Regenerated ${results.length} demo scenarios.`,
+        deleted,
+        scenarios: results,
       });
-      const newCount = await storage.getDemoVersionCount();
-      res.json({ message: `Demo version created. ${newCount}/10 seeded.`, count: newCount });
     } catch (err) {
       console.error("Demo seed failed:", err);
-      res.status(500).json({ message: "Failed to generate demo version." });
+      res.status(500).json({ message: "Failed to generate demo versions." });
     }
   });
 
