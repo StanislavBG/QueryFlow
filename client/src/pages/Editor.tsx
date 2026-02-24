@@ -1193,8 +1193,29 @@ export default function Editor() {
           )}
         </div>
 
-        {/* Right: theme + auth + settings */}
+        {/* Right: tools + theme + auth + settings */}
         <div className="flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={() => setLocation("/prompt")} className="h-7 px-2 text-xs gap-1">
+                <Sparkles className="w-3.5 h-3.5" /> Prompt
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p className="text-xs">Prompt Engineer — AIM Framework</p>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={() => setLocation("/research")} className="h-7 px-2 text-xs gap-1">
+                <MessageSquare className="w-3.5 h-3.5" /> Research
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p className="text-xs">GPT to Context — Research Assistant</p>
+            </TooltipContent>
+          </Tooltip>
+          <div className="h-4 w-px bg-border" />
           {isAdmin && (
             <Tooltip>
               <TooltipTrigger asChild>
