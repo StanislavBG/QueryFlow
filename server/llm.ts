@@ -822,21 +822,32 @@ RULES:
 - If this portion contains NO schema definitions at all, return {"tables": [], "ddl": ""}
 - Output ONLY the JSON object below — no explanation, no markdown fences, no other text
 
-CONTEXT EXTRACTION — this is critical:
-- If the input contains descriptive text about a table (what it stores, its business purpose, how it relates to other tables), capture it verbatim in that table's "context" field.
-- If the input contains descriptive text about a column (what it means, valid values, business logic, usage notes), capture it verbatim in that column's "context" field.
-- Context can appear as inline comments (-- ...), text after a dash (- description), prose paragraphs describing tables, column annotations, or any human-readable description adjacent to schema elements.
-- Preserve the user's original wording — do not paraphrase or summarize. The analyst wrote it deliberately.
+CONTEXT EXTRACTION AND CLEANUP — this is critical:
+- If the input contains descriptive text about a table or column, extract the BUSINESS MEANING and store it as clean, professional context.
+- Context can appear as inline comments (-- ...), text after a dash (- description), prose paragraphs, column annotations, or any human-readable description adjacent to schema elements.
+- CLEAN UP conversational language: Remove filler phrases like "That table is...", "This column is...", "this is the...", "that is used for...", "make sure for...", "in the logic always use...". Strip casual speech patterns and rewrite as concise business definitions.
+- FIX typos and normalize terminology: correct obvious misspellings (e.g. "fyscal" → "fiscal", "quaretr" → "quarter", "usisnally" → "usually", "teh" → "the", "suppllier" → "supplier") and normalize abbreviations on first use (e.g. "FG (finished good)" on first mention, then just "FG").
+- PRESERVE all business-critical details: domain terms, valid values/examples, business rules, relationships to other tables/columns, data lineage notes, and usage guidance for queries. Do not drop any substantive information.
+- KEEP operational notes that matter for queries: e.g. "always use Product_Used_In as part of indexes/keys" or "could be null for WLAN models" — these are important for the analyst.
+- Context should read like a clean data dictionary entry, not a conversation transcript.
 - If no context/description is provided for a table or column, omit the "context" field (do not set it to empty string).
+
+CONTEXT EXAMPLES (input → cleaned output):
+- Input: "That Table is the main table that we store quarterly BOMs component level information"
+  Output: "Stores quarterly BOM (Bill of Materials) component-level information"
+- Input: "make sure for unique records in the table, could be same info but coming from a different level of theBOM"
+  Output: "Ensures record uniqueness; same info may appear from different BOM levels"
+- Input: "This should be PK, but Item in BOM plays that role, in the logic always use Product_Used_In as part of the indexes, keys"
+  Output: "SKU for the FG (finished good). Not a formal PK (ITEM_IN_BOM serves that role), but should always be included in indexes and keys"
 
 OUTPUT FORMAT — a single JSON object:
 {
   "tables": [
     {
       "name": "table_name",
-      "context": "Business description of what this table stores and its purpose",
+      "context": "Clean business description: what the table stores, its purpose, update frequency",
       "columns": [
-        {"name": "col_name", "type": "VARCHAR(255)", "isPrimaryKey": true, "context": "Description of what this column means"}
+        {"name": "col_name", "type": "VARCHAR(255)", "isPrimaryKey": true, "context": "Clean business definition. Valid values or examples if mentioned. Query usage notes if relevant"}
       ],
       "relationships": [
         {"fromCol": "user_id", "toTable": "users", "toCol": "id"}
