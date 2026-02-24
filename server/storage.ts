@@ -35,6 +35,9 @@ import {
   type InsertSchemaVoiceContext,
   type DemoVersion,
   type InsertDemoVersion,
+  payments,
+  type Payment,
+  type InsertPayment,
 } from "@shared/schema";
 import { encrypt, decrypt, encryptJson, decryptJson } from "./encryption";
 
@@ -99,6 +102,11 @@ export interface IStorage {
   getDemoVersionCount(): Promise<number>;
   getRandomDemoVersion(): Promise<DemoVersion | undefined>;
   createDemoVersion(data: InsertDemoVersion): Promise<DemoVersion>;
+
+  // Payments
+  createPayment(data: InsertPayment): Promise<Payment>;
+  updatePaymentBySessionId(sessionId: string, data: Partial<InsertPayment>): Promise<Payment | undefined>;
+  getPaymentsByUserId(userId: string): Promise<Payment[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -558,6 +566,25 @@ export class DatabaseStorage implements IStorage {
   async deleteAllDemoVersions(): Promise<number> {
     const result = await db.delete(demoVersions).returning();
     return result.length;
+  }
+
+  // Payments
+  async createPayment(data: InsertPayment): Promise<Payment> {
+    const [created] = await db.insert(payments).values(data).returning();
+    return created;
+  }
+
+  async updatePaymentBySessionId(sessionId: string, data: Partial<InsertPayment>): Promise<Payment | undefined> {
+    const [updated] = await db
+      .update(payments)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(payments.stripeSessionId, sessionId))
+      .returning();
+    return updated;
+  }
+
+  async getPaymentsByUserId(userId: string): Promise<Payment[]> {
+    return await db.select().from(payments).where(eq(payments.userId, userId)).orderBy(desc(payments.createdAt));
   }
 }
 
