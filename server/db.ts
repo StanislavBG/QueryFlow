@@ -139,6 +139,24 @@ export async function ensureTables(): Promise<void> {
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS payments (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(128) NOT NULL,
+        stripe_session_id VARCHAR(256) NOT NULL,
+        stripe_customer_id VARCHAR(256),
+        stripe_payment_intent_id VARCHAR(256),
+        product_id VARCHAR(256),
+        price_id VARCHAR(256),
+        amount INTEGER,
+        currency VARCHAR(8),
+        status VARCHAR(32) NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id);
+      CREATE INDEX IF NOT EXISTS idx_payments_stripe_session_id ON payments(stripe_session_id);
     `);
   } finally {
     client.release();

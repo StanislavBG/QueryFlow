@@ -214,3 +214,27 @@ export const insertChatMessageSchema = createInsertSchema(chatMessages).omit({ i
 
 export type ChatMessage = typeof chatMessages.$inferSelect;
 export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
+
+// Payments table (Stripe checkout records)
+export const payments = pgTable("payments", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id", { length: 128 }).notNull(),
+  stripeSessionId: varchar("stripe_session_id", { length: 256 }).notNull(),
+  stripeCustomerId: varchar("stripe_customer_id", { length: 256 }),
+  stripePaymentIntentId: varchar("stripe_payment_intent_id", { length: 256 }),
+  productId: varchar("product_id", { length: 256 }),
+  priceId: varchar("price_id", { length: 256 }),
+  amount: integer("amount"),
+  currency: varchar("currency", { length: 8 }),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type Payment = typeof payments.$inferSelect;
+export type InsertPayment = typeof payments.$inferInsert;
+
+// Zod schema for create-checkout-session request
+export const createCheckoutSessionSchema = z.object({
+  priceId: z.string().min(1),
+});
