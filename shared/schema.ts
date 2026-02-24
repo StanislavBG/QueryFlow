@@ -129,6 +129,7 @@ export interface ParsedColumn {
   name: string;
   type: string;
   isPrimaryKey: boolean;
+  context?: string;
 }
 
 export interface ParsedRelationship {
@@ -139,6 +140,7 @@ export interface ParsedRelationship {
 
 export interface ParsedTable {
   name: string;
+  context?: string;
   columns: ParsedColumn[];
   relationships?: ParsedRelationship[];
 }

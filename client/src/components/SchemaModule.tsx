@@ -20,6 +20,7 @@ import {
   Bug,
   Copy,
   Check,
+  Info,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { VoiceContextButton } from "@/components/VoiceContextButton";
@@ -58,10 +59,12 @@ export function normalizeTables(tables: unknown): ParsedTable[] {
     // New format: columns are objects
     return {
       name: t.name,
+      ...(typeof t.context === "string" && t.context.trim() ? { context: t.context.trim() } : {}),
       columns: t.columns.map((c: any) => ({
         name: c.name || "",
         type: c.type || "",
         isPrimaryKey: !!c.isPrimaryKey,
+        ...(typeof c.context === "string" && c.context.trim() ? { context: c.context.trim() } : {}),
       })),
       relationships: Array.isArray(t.relationships)
         ? t.relationships.map((r: any) => ({
@@ -152,12 +155,9 @@ function SchemaTreeNode({
         )}
         <Database className="w-3 h-3 text-primary flex-shrink-0" />
         <span className="text-[11px] font-medium truncate flex-1">{schema.name}</span>
-        <VoiceContextButton
-          schemaId={schema.id}
-          targetType="schema"
-          existingContext={findVoiceContext(voiceContexts, "schema")}
-          size="sm"
-        />
+        {(findVoiceContext(voiceContexts, "schema") || schema.description) && (
+          <Info className="w-2.5 h-2.5 text-violet-400/60 flex-shrink-0" />
+        )}
         <span className="text-[9px] text-muted-foreground/50">{tables.length}</span>
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(schema.id); }}
@@ -194,13 +194,9 @@ function SchemaTreeNode({
               )}
               <Table2 className="w-3 h-3 text-emerald-500 flex-shrink-0" />
               <span className="text-[10px] font-medium truncate">{table.name}</span>
-              <VoiceContextButton
-                schemaId={schema.id}
-                targetType="table"
-                targetTable={table.name}
-                existingContext={findVoiceContext(voiceContexts, "table", table.name)}
-                size="sm"
-              />
+              {(table.context || findVoiceContext(voiceContexts, "table", table.name)) && (
+                <Info className="w-2.5 h-2.5 text-violet-400/60 flex-shrink-0" />
+              )}
               <span className="text-[9px] text-muted-foreground/50 ml-auto">{table.columns.length}</span>
               <button
                 onClick={(e) => { e.stopPropagation(); onDeleteTable(schema.id, table.name); }}
@@ -235,19 +231,14 @@ function SchemaTreeNode({
                       <span className={`font-mono truncate ${col.isPrimaryKey ? "text-foreground font-medium" : "text-muted-foreground"}`}>
                         {col.name}
                       </span>
+                      {(col.context || findVoiceContext(voiceContexts, "column", table.name, col.name)) && (
+                        <Info className="w-2 h-2 text-violet-400/60 flex-shrink-0" />
+                      )}
                       {col.type && (
                         <span className="text-[9px] text-muted-foreground/50 ml-auto font-mono flex-shrink-0">
                           {col.type}
                         </span>
                       )}
-                      <VoiceContextButton
-                        schemaId={schema.id}
-                        targetType="column"
-                        targetTable={table.name}
-                        targetColumn={col.name}
-                        existingContext={findVoiceContext(voiceContexts, "column", table.name, col.name)}
-                        size="sm"
-                      />
                     </div>
                   );
                 })}
