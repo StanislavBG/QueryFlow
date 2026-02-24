@@ -1144,6 +1144,86 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
     res.json({ message: "Schema deleted" });
   });
 
+  // ─── Add Tables to Existing Schema (LLM-parsed) ──────────────────
+  // Accepts raw text (paste or file content), parses via LLM, and merges
+  // new tables into an existing schema.
+
+  app.post("/api/schemas/:id/add-tables", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid schema ID" });
+
+    try {
+      const input = z.object({
+        rawContent: z.string().min(1),
+        fileName: z.string().optional(),
+      }).parse(req.body);
+
+      const schema = await storage.getUserSchema(id);
+      if (!schema) return res.status(404).json({ message: "Schema not found" });
+
+      if (!isLLMConfigured()) {
+        return res.status(503).json({
+          message: "LLM not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY to enable table parsing.",
+        });
+      }
+
+      // Parse the raw content via LLM
+      const result = await llmParseSchema(input.rawContent, input.fileName || "added-tables.txt");
+
+      if (result.tables.length === 0) {
+        return res.status(422).json({
+          message: result.error || "No tables could be parsed from the provided content.",
+        });
+      }
+
+      // Merge new tables into existing tables (skip duplicates by name)
+      const existingTables: ParsedTable[] = Array.isArray(schema.tables) ? schema.tables as ParsedTable[] : [];
+      const existingNames = new Set(existingTables.map(t => t.name.toLowerCase()));
+      const newTables = result.tables.filter(t => !existingNames.has(t.name.toLowerCase()));
+      const duplicates = result.tables.filter(t => existingNames.has(t.name.toLowerCase())).map(t => t.name);
+
+      if (newTables.length === 0) {
+        return res.status(422).json({
+          message: `All parsed tables already exist in this schema: ${duplicates.join(", ")}`,
+        });
+      }
+
+      const mergedTables = [...existingTables, ...newTables];
+
+      // Append new DDL to existing parsedDdl
+      const existingDdl = schema.parsedDdl || "";
+      const newDdl = result.parsed || "";
+      const mergedDdl = existingDdl ? `${existingDdl}\n\n${newDdl}` : newDdl;
+
+      // Append raw content
+      const existingRaw = schema.rawContent || "";
+      const mergedRaw = existingRaw ? `${existingRaw}\n\n${input.rawContent}` : input.rawContent;
+
+      const updated = await storage.updateUserSchema(id, {
+        tables: mergedTables,
+        parsedDdl: mergedDdl,
+        rawContent: mergedRaw,
+      });
+
+      if (!updated) return res.status(404).json({ message: "Schema not found" });
+
+      const { userId } = getAuth(req);
+      logActivity(userId, "schema.addTables", "schema", id);
+
+      res.json({
+        schema: updated,
+        added: newTables.map(t => t.name),
+        duplicatesSkipped: duplicates,
+      });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error("[schema-route] add-tables failed:", err);
+      res.status(500).json({ message: err instanceof Error ? err.message : "Failed to add tables" });
+    }
+  });
+
   // ─── Schema Voice Context Routes ──────────────────────────────────
 
   app.get("/api/schemas/:schemaId/voice-context", async (req, res) => {

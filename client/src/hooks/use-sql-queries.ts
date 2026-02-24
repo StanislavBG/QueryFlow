@@ -522,6 +522,31 @@ export function useDeleteUserSchema() {
   });
 }
 
+export function useAddTablesToSchema() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { schema: UserSchema; added: string[]; duplicatesSkipped: string[] },
+    Error,
+    { schemaId: number; rawContent: string; fileName?: string }
+  >({
+    mutationFn: async ({ schemaId, rawContent, fileName }) => {
+      const res = await fetch(`/api/schemas/${schemaId}/add-tables`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rawContent, fileName }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Failed to add tables" }));
+        throw new Error(err.message);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["schemas"] });
+    },
+  });
+}
+
 // ─── Schema Voice Context ───────────────────────────────────────────
 
 export function useSchemaVoiceContexts(schemaId: number | null) {
