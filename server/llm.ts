@@ -546,6 +546,81 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
   return null;
 }
 
+/**
+ * Attempt to repair truncated JSON from an LLM response that was cut off
+ * due to token limits. Scans character-by-character to find the last
+ * structurally complete element, removes trailing incomplete data, then
+ * closes all open brackets/braces.
+ */
+function repairTruncatedJson(text: string): Record<string, unknown> | null {
+  const stripped = text.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
+  const start = stripped.indexOf("{");
+  if (start === -1) return null;
+
+  let json = stripped.slice(start);
+
+  // Scan to find the last position where a structural element was fully closed
+  let inString = false;
+  let escaped = false;
+  const stack: string[] = [];
+  let lastCompletePos = -1;
+
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (escaped) { escaped = false; continue; }
+    if (inString) {
+      if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{" || ch === "[") {
+      stack.push(ch === "{" ? "}" : "]");
+    } else if (ch === "}" || ch === "]") {
+      if (stack.length > 0) stack.pop();
+      lastCompletePos = i;
+    } else if (ch === ",") {
+      lastCompletePos = i;
+    }
+  }
+
+  // Trim to last complete structural boundary
+  if (stack.length > 0 && lastCompletePos > 0) {
+    json = json.slice(0, lastCompletePos + 1);
+  }
+
+  // Remove trailing commas
+  json = json.replace(/,\s*$/, "");
+
+  // Re-scan to count remaining open brackets
+  inString = false;
+  escaped = false;
+  const closers: string[] = [];
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (escaped) { escaped = false; continue; }
+    if (inString) {
+      if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{") closers.push("}");
+    else if (ch === "[") closers.push("]");
+    else if (ch === "}" || ch === "]") closers.pop();
+  }
+
+  // Close all open brackets/braces
+  json += closers.reverse().join("");
+
+  try {
+    const parsed = JSON.parse(json);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+  } catch { /* repair failed */ }
+
+  return null;
+}
+
 import type { ParsedTable } from "@shared/schema";
 
 /**
@@ -949,6 +1024,158 @@ export function getDemoScenarioName(index: number): string {
  * intermediate transformations (CTEs, temp tables, subqueries) to the final
  * output.  Returns a WaterfallAnalysis object.
  */
+/**
+ * Validate and normalize raw node objects from the LLM response.
+ * Handles case-insensitive node type matching and common LLM variations.
+ */
+const VALID_NODE_TYPES = new Set([
+  "source_table", "cte", "temp_table", "derived_table", "final_output",
+]);
+const NODE_TYPE_ALIASES: Record<string, WaterfallNode["nodeType"]> = {
+  source: "source_table",
+  table: "source_table",
+  base_table: "source_table",
+  temporary_table: "temp_table",
+  temp: "temp_table",
+  common_table_expression: "cte",
+  subquery: "derived_table",
+  output: "final_output",
+  result: "final_output",
+  final: "final_output",
+  final_select: "final_output",
+};
+
+function normalizeNodeType(raw: unknown): WaterfallNode["nodeType"] {
+  const s = String(raw).toLowerCase().trim();
+  if (VALID_NODE_TYPES.has(s)) return s as WaterfallNode["nodeType"];
+  return NODE_TYPE_ALIASES[s] ?? "source_table";
+}
+
+const VALID_EDGE_TYPES = new Set([
+  "join", "create_insert", "cte_definition", "subquery_ref", "select_from",
+]);
+const EDGE_TYPE_ALIASES: Record<string, WaterfallEdge["edgeType"]> = {
+  inner_join: "join",
+  left_join: "join",
+  right_join: "join",
+  full_join: "join",
+  cross_join: "join",
+  create: "create_insert",
+  insert: "create_insert",
+  insert_into: "create_insert",
+  cte: "cte_definition",
+  cte_ref: "cte_definition",
+  subquery: "subquery_ref",
+  derived: "subquery_ref",
+  select: "select_from",
+  from: "select_from",
+};
+
+function normalizeEdgeType(raw: unknown): WaterfallEdge["edgeType"] {
+  const s = String(raw).toLowerCase().trim();
+  if (VALID_EDGE_TYPES.has(s)) return s as WaterfallEdge["edgeType"];
+  return EDGE_TYPE_ALIASES[s] ?? "select_from";
+}
+
+function validateNodes(raw: unknown[]): WaterfallNode[] {
+  return (raw as Array<Record<string, unknown>>)
+    .filter(
+      (n) =>
+        typeof n.id === "string" &&
+        typeof n.name === "string" &&
+        typeof n.stepIndex === "number"
+    )
+    .map((n) => ({
+      id: String(n.id),
+      name: String(n.name),
+      nodeType: normalizeNodeType(n.nodeType),
+      columns: Array.isArray(n.columns)
+        ? (n.columns as unknown[]).map(String)
+        : undefined,
+      stepIndex: Number(n.stepIndex),
+    }));
+}
+
+function validateEdges(raw: unknown[], nodeIds: Set<string>): WaterfallEdge[] {
+  return (raw as Array<Record<string, unknown>>)
+    .filter(
+      (e) =>
+        typeof e.id === "string" &&
+        typeof e.fromNodeId === "string" &&
+        typeof e.toNodeId === "string" &&
+        nodeIds.has(String(e.fromNodeId)) &&
+        nodeIds.has(String(e.toNodeId))
+    )
+    .map((e) => ({
+      id: String(e.id),
+      fromNodeId: String(e.fromNodeId),
+      toNodeId: String(e.toNodeId),
+      edgeType: normalizeEdgeType(e.edgeType),
+      sqlStatement: String(e.sqlStatement || ""),
+      joinDetails: e.joinDetails ? String(e.joinDetails) : undefined,
+    }));
+}
+
+/**
+ * When the initial waterfall call returns nodes but zero edges (typically
+ * due to token-limit truncation), make a focused second LLM call that
+ * provides the already-extracted nodes and asks only for edges.
+ */
+async function recoverWaterfallEdges(
+  ai: OpenAI,
+  sql: string,
+  nodes: WaterfallNode[],
+  options: { dialect?: string; schemas?: string }
+): Promise<WaterfallEdge[]> {
+  const dialectHint = options.dialect ? `SQL dialect: ${options.dialect}. ` : "";
+  const nodeList = nodes
+    .map((n) => `  ${n.id}: "${n.name}" (${n.nodeType}, step ${n.stepIndex})`)
+    .join("\n");
+
+  const response = await ai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 16384,
+    messages: [
+      {
+        role: "system",
+        content: `Generate ONLY the edges (connections) for a SQL data flow DAG. ${dialectHint}
+
+The nodes have already been identified:
+${nodeList}
+
+Edge types: "join" (JOIN), "create_insert" (CREATE/INSERT INTO SELECT), "cte_definition" (CTE body), "subquery_ref" (derived subquery), "select_from" (simple SELECT FROM).
+
+For each edge provide:
+- id: "edge_0", "edge_1", etc.
+- fromNodeId: must be one of the node IDs listed above
+- toNodeId: must be one of the node IDs listed above
+- edgeType: one of the edge types above
+- sqlStatement: the KEY SQL clause for this data movement (the JOIN, SELECT FROM, INSERT INTO, etc.)
+- joinDetails: for JOIN edges only, the ON condition
+
+Every node must have at least one edge. Return ONLY a JSON array: [{"id":"edge_0",...},...]`,
+      },
+      { role: "user", content: sql },
+    ],
+  });
+
+  const text = extractText(response);
+  const arrayMatch = text.match(/\[[\s\S]*\]/);
+  if (!arrayMatch) return [];
+
+  let rawEdges: unknown[];
+  try {
+    rawEdges = JSON.parse(arrayMatch[0]);
+  } catch {
+    return [];
+  }
+
+  if (!Array.isArray(rawEdges)) return [];
+
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  return validateEdges(rawEdges, nodeIds);
+}
+
 export async function llmAnalyzeWaterfall(
   sql: string,
   options: { dialect?: string; schemas?: string } = {}
@@ -962,6 +1189,14 @@ export async function llmAnalyzeWaterfall(
     ? `\n\nKnown database schema:\n${options.schemas}`
     : "";
 
+  // For large queries, adapt the prompt to prioritize graph completeness
+  // over full verbatim SQL in each edge (prevents token-limit truncation).
+  const isLargeQuery = sql.length > 4000;
+
+  const sqlStatementRule = isLargeQuery
+    ? `- sqlStatement: Provide the KEY SQL clause that defines this data movement (the JOIN, SELECT FROM, INSERT INTO SELECT, etc.). Include the core clause with conditions, but you may summarize very long column lists. Prioritize generating ALL edges over including complete SQL text.`
+    : `- sqlStatement: MUST be the FULL, COMPLETE, UNTRUNCATED verbatim SQL from the user's input that corresponds to that data movement. Copy the ENTIRE relevant clause — never abbreviate, never use "...", never summarize, never replace parts with ellipsis or placeholders. Include every column, condition, and expression exactly as written. This is critical — the user needs to see and verify the exact SQL.`;
+
   const systemPrompt = `Decompose the SQL into a DAG of data flow. ${dialectHint}${schemaHint}
 
 Node types: "source_table" (base tables in FROM/JOIN), "cte" (WITH AS), "temp_table" (#temp/CREATE TEMP), "derived_table" (subquery in FROM), "final_output" (final SELECT or target INSERT table).
@@ -970,82 +1205,59 @@ Edge types: "join" (JOIN), "create_insert" (CREATE/INSERT INTO SELECT), "cte_def
 
 Rules:
 - stepIndex: 0 for source tables, increment for each transformation layer. Same stepIndex = side-by-side.
+- Correctly identify node types: CTEs should be "cte", temp tables (#temp/CREATE TEMP) should be "temp_table", subqueries in FROM should be "derived_table", and the final result should be "final_output". Only base tables from the database should be "source_table".
 - For JOINs of N sources into 1 destination: one edge per source, same sqlStatement.
-- sqlStatement: MUST be the FULL, COMPLETE, UNTRUNCATED verbatim SQL from the user's input that corresponds to that data movement. Copy the ENTIRE relevant clause — never abbreviate, never use "...", never summarize, never replace parts with ellipsis or placeholders. Include every column, condition, and expression exactly as written. This is critical — the user needs to see and verify the exact SQL.
+${sqlStatementRule}
 - joinDetails: for JOIN edges only, the ON condition (also full and verbatim).
 - IDs: "node_0","node_1"... and "edge_0","edge_1"...
 - Every node must have at least one edge.
+- CRITICAL: The edges array is essential. Always generate the complete edges array. If the query is very large, keep sqlStatement values concise to ensure all edges fit in the response.
 
 Return ONLY JSON:
 {"nodes":[...],"edges":[...],"summary":"brief description"}`;
 
   const response = await ai.chat.completions.create({
     model: MODEL,
-    max_tokens: 16384,
+    max_tokens: 32768,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: sql },
     ],
   });
 
+  const finishReason = response.choices[0]?.finish_reason;
   const text = extractText(response);
-  const raw = extractJsonObject(text);
 
-  if (!raw || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) {
+  // Try standard extraction first
+  let raw = extractJsonObject(text);
+
+  // If standard extraction failed and response was truncated, try repair
+  if (!raw && finishReason === "length") {
+    console.log("[waterfall] Response truncated (finish_reason=length) — attempting JSON repair");
+    raw = repairTruncatedJson(text);
+    if (raw) {
+      console.log("[waterfall] Successfully repaired truncated JSON");
+    }
+  }
+
+  if (!raw || !Array.isArray(raw.nodes)) {
     logLlmError("waterfall", "Failed to parse waterfall analysis — LLM did not return valid {nodes,edges} JSON", {
       rawResponse: text,
       inputPreview: sql,
+      finishReason: finishReason ?? "unknown",
     });
     throw new Error("Failed to parse waterfall analysis from LLM response");
   }
 
-  // Validate & normalize nodes
-  const validNodeTypes = new Set([
-    "source_table", "cte", "temp_table", "derived_table", "final_output",
-  ]);
-  const nodes: WaterfallNode[] = (raw.nodes as Array<Record<string, unknown>>)
-    .filter(
-      (n) =>
-        typeof n.id === "string" &&
-        typeof n.name === "string" &&
-        typeof n.stepIndex === "number"
-    )
-    .map((n) => ({
-      id: String(n.id),
-      name: String(n.name),
-      nodeType: validNodeTypes.has(String(n.nodeType))
-        ? (String(n.nodeType) as WaterfallNode["nodeType"])
-        : "source_table",
-      columns: Array.isArray(n.columns)
-        ? (n.columns as unknown[]).map(String)
-        : undefined,
-      stepIndex: Number(n.stepIndex),
-    }));
+  // Ensure edges is at least an empty array (may be missing from truncated response)
+  if (!Array.isArray(raw.edges)) {
+    raw.edges = [];
+  }
 
-  // Validate & normalize edges
+  // Validate & normalize
+  const nodes = validateNodes(raw.nodes as unknown[]);
   const nodeIds = new Set(nodes.map((n) => n.id));
-  const validEdgeTypes = new Set([
-    "join", "create_insert", "cte_definition", "subquery_ref", "select_from",
-  ]);
-  const edges: WaterfallEdge[] = (raw.edges as Array<Record<string, unknown>>)
-    .filter(
-      (e) =>
-        typeof e.id === "string" &&
-        typeof e.fromNodeId === "string" &&
-        typeof e.toNodeId === "string" &&
-        nodeIds.has(String(e.fromNodeId)) &&
-        nodeIds.has(String(e.toNodeId))
-    )
-    .map((e) => ({
-      id: String(e.id),
-      fromNodeId: String(e.fromNodeId),
-      toNodeId: String(e.toNodeId),
-      edgeType: validEdgeTypes.has(String(e.edgeType))
-        ? (String(e.edgeType) as WaterfallEdge["edgeType"])
-        : "select_from",
-      sqlStatement: String(e.sqlStatement || ""),
-      joinDetails: e.joinDetails ? String(e.joinDetails) : undefined,
-    }));
+  let edges = validateEdges(raw.edges as unknown[], nodeIds);
 
   if (nodes.length === 0) {
     logLlmError("waterfall", "Waterfall analysis produced no valid nodes after validation", {
@@ -1053,6 +1265,24 @@ Return ONLY JSON:
       inputPreview: sql,
     });
     throw new Error("Waterfall analysis produced no valid nodes");
+  }
+
+  // Edge recovery: if we have nodes but no edges (common with truncated
+  // responses or very large queries), make a focused second call.
+  if (nodes.length > 0 && edges.length === 0) {
+    console.log(`[waterfall] Got ${nodes.length} nodes but 0 edges — attempting edge recovery call`);
+    try {
+      const recovered = await recoverWaterfallEdges(ai, sql, nodes, options);
+      if (recovered.length > 0) {
+        console.log(`[waterfall] Edge recovery succeeded: ${recovered.length} edges recovered`);
+        edges = recovered;
+      } else {
+        console.warn("[waterfall] Edge recovery returned 0 edges");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("[waterfall] Edge recovery failed:", msg);
+    }
   }
 
   return {
