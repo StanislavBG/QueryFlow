@@ -78,7 +78,6 @@ function SchemaOverview({
   const addTablesMutation = useAddTablesToSchema();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [showAddTable, setShowAddTable] = useState(false);
   const [pasteContent, setPasteContent] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -130,7 +129,6 @@ function SchemaOverview({
             desc += ` ${skippedCount} duplicate${skippedCount !== 1 ? "s" : ""} skipped.`;
           }
           toast({ title: "Tables added", description: desc });
-          setShowAddTable(false);
           setPasteContent("");
         },
         onError: (err) => toast({ title: "Failed to add tables", description: err.message, variant: "destructive" }),
@@ -286,121 +284,93 @@ function SchemaOverview({
           );
         })}
 
-        {/* Smart Add Table widget */}
-        {!showAddTable ? (
-          <button
-            onClick={() => setShowAddTable(true)}
-            disabled={isAddingTables}
-            className="rounded-lg border-2 border-dashed border-border bg-card/50 shadow-sm overflow-hidden text-left hover:border-primary/50 hover:shadow-md transition-all flex flex-col items-center justify-center gap-2 py-8 min-h-[100px] disabled:opacity-50"
+      </div>
+
+      {/* Smart Add Table widget — always visible at bottom */}
+      <div className="rounded-lg border-2 border-dashed border-primary/30 bg-card shadow-sm overflow-hidden">
+        <div className="px-3 py-2 bg-primary/5 border-b border-border flex items-center gap-2">
+          <Plus className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+          <span className="text-xs font-semibold text-foreground flex-1">Add Tables</span>
+        </div>
+        <div className="p-4 space-y-3">
+          <p className="text-[11px] text-muted-foreground">
+            Paste DDL, DESCRIBE output, or any table definition text. You can also drop a file.
+          </p>
+
+          {/* Drop zone */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={handleFileDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
+              isDragOver
+                ? "border-primary bg-primary/5"
+                : "border-border hover:border-primary/50"
+            }`}
           >
-            {isAddingTables ? (
-              <>
-                <Loader2 className="w-5 h-5 text-primary animate-spin" />
-                <span className="text-xs text-muted-foreground">Parsing tables...</span>
-              </>
-            ) : (
-              <>
-                <Plus className="w-5 h-5 text-muted-foreground/50" />
-                <span className="text-xs text-muted-foreground/50">Add Table</span>
-              </>
-            )}
-          </button>
-        ) : (
-          <div className="rounded-lg border-2 border-dashed border-primary/30 bg-card shadow-sm overflow-hidden min-h-[100px] col-span-full">
-            <div className="px-3 py-2 bg-primary/5 border-b border-border flex items-center gap-2">
-              <Plus className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-              <span className="text-xs font-semibold text-foreground flex-1">Add Tables</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-5 w-5 p-0"
-                aria-label="Close"
-                onClick={() => { setShowAddTable(false); setPasteContent(""); }}
-              >
-                <X className="w-3 h-3 text-muted-foreground" />
-              </Button>
-            </div>
-            <div className="p-4 space-y-3">
-              <p className="text-[11px] text-muted-foreground">
-                Paste DDL, DESCRIBE output, or any table definition text. You can also drop a file.
-              </p>
-
-              {/* Drop zone */}
-              <div
-                onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-                onDragLeave={() => setIsDragOver(false)}
-                onDrop={handleFileDrop}
-                onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
-                  isDragOver
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/50"
-                }`}
-              >
-                <Upload className="w-5 h-5 mx-auto mb-1.5 text-muted-foreground/50" />
-                <p className="text-[11px] text-muted-foreground">Drop a file or click to upload</p>
-                <p className="text-[10px] text-muted-foreground/50 mt-0.5">SQL DDL, CSV, JSON, or text</p>
-              </div>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".sql,.txt,.csv,.json,.ddl,.tsv"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-
-              {/* Paste area */}
-              <Textarea
-                value={pasteContent}
-                onChange={(e) => setPasteContent(e.target.value)}
-                placeholder="Paste table definitions here (CREATE TABLE, DESCRIBE output, etc.)"
-                className="text-xs min-h-[80px] max-h-[200px] font-mono"
-              />
-
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  className="h-7 text-xs"
-                  disabled={!pasteContent.trim() || isAddingTables}
-                  onClick={() => handleAddTablesFromContent(pasteContent)}
-                >
-                  {isAddingTables ? (
-                    <>
-                      <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
-                      Parsing...
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="w-3 h-3 mr-1.5" />
-                      Parse & Add Tables
-                    </>
-                  )}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  disabled={isAddingTables}
-                  onClick={() => {
-                    navigator.clipboard.readText().then((text) => {
-                      if (text.trim()) {
-                        setPasteContent(text);
-                      } else {
-                        toast({ title: "Clipboard empty", variant: "destructive" });
-                      }
-                    }).catch(() => {
-                      toast({ title: "Clipboard access denied", description: "Allow clipboard access to paste.", variant: "destructive" });
-                    });
-                  }}
-                >
-                  <FileText className="w-3 h-3 mr-1.5" />
-                  Paste from clipboard
-                </Button>
-              </div>
-            </div>
+            <Upload className="w-5 h-5 mx-auto mb-1.5 text-muted-foreground/50" />
+            <p className="text-[11px] text-muted-foreground">Drop a file or click to upload</p>
+            <p className="text-[10px] text-muted-foreground/50 mt-0.5">SQL DDL, CSV, JSON, or text</p>
           </div>
-        )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".sql,.txt,.csv,.json,.ddl,.tsv"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+
+          {/* Paste area */}
+          <Textarea
+            value={pasteContent}
+            onChange={(e) => setPasteContent(e.target.value)}
+            placeholder="Paste table definitions here (CREATE TABLE, DESCRIBE output, etc.)"
+            className="text-xs min-h-[80px] max-h-[200px] font-mono"
+          />
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="h-7 text-xs"
+              disabled={!pasteContent.trim() || isAddingTables}
+              onClick={() => handleAddTablesFromContent(pasteContent)}
+            >
+              {isAddingTables ? (
+                <>
+                  <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                  Parsing...
+                </>
+              ) : (
+                <>
+                  <Plus className="w-3 h-3 mr-1.5" />
+                  Parse & Add Tables
+                </>
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              disabled={isAddingTables}
+              onClick={() => {
+                navigator.clipboard.readText().then((text) => {
+                  if (text.trim()) {
+                    setPasteContent(text);
+                  } else {
+                    toast({ title: "Clipboard empty", variant: "destructive" });
+                  }
+                }).catch(() => {
+                  toast({ title: "Clipboard access denied", description: "Allow clipboard access to paste.", variant: "destructive" });
+                });
+              }}
+            >
+              <FileText className="w-3 h-3 mr-1.5" />
+              Paste from clipboard
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );
