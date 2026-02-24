@@ -1351,9 +1351,117 @@ export interface ResearchChatMessage {
   content: string;
 }
 
+// ---------------------------------------------------------------------------
+// Agent tool definitions — exposed to the research chat LLM so it can
+// perform CRUD operations on the site on behalf of the user.
+// ---------------------------------------------------------------------------
+
+export const AGENT_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "create_schema",
+      description: "Upload / create a new database schema definition in QueryFlow. Use this when the user pastes DDL, DESCRIBE output, or any schema content and asks you to add it to their context.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "A short descriptive name for the schema (e.g. 'GSM Supply Chain')" },
+          rawContent: { type: "string", description: "The raw schema content — DDL, DESCRIBE output, CSV, or any format. Will be LLM-parsed." },
+          description: { type: "string", description: "Optional description of what this schema represents." },
+        },
+        required: ["name", "rawContent"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_schema",
+      description: "Update an existing schema definition. Use when the user wants to replace or modify schema content that already exists.",
+      parameters: {
+        type: "object",
+        properties: {
+          schemaId: { type: "number", description: "ID of the schema to update" },
+          name: { type: "string", description: "New name (optional)" },
+          rawContent: { type: "string", description: "New raw schema content (optional — will trigger re-parse)" },
+          description: { type: "string", description: "New description (optional)" },
+        },
+        required: ["schemaId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_schemas",
+      description: "List all schemas the user has uploaded. Use to check what schemas already exist before creating or updating.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_voice_context",
+      description: "Add a text annotation (voice context) to a schema, table, or column. These annotations provide business-meaning context that is sent to the LLM during query analysis.",
+      parameters: {
+        type: "object",
+        properties: {
+          schemaId: { type: "number", description: "ID of the schema to annotate" },
+          targetType: { type: "string", enum: ["schema", "table", "column"], description: "What level to annotate" },
+          targetTable: { type: "string", description: "Table name (required for table/column targets)" },
+          targetColumn: { type: "string", description: "Column name (required for column target)" },
+          transcript: { type: "string", description: "The annotation text — business meaning, usage notes, etc." },
+        },
+        required: ["schemaId", "targetType", "transcript"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_document",
+      description: "Create a reference document. These are sent as additional context during query analysis.",
+      parameters: {
+        type: "object",
+        properties: {
+          content: { type: "string", description: "Document content" },
+          contentType: { type: "string", enum: ["text", "json", "md"], description: "Content format" },
+        },
+        required: ["content", "contentType"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_query",
+      description: "Create a new SQL query in QueryFlow. Use when the user provides a SQL query to save.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Short title for the query" },
+          content: { type: "string", description: "The SQL query content" },
+        },
+        required: ["title", "content"],
+      },
+    },
+  },
+];
+
+/** Result of executing a single agent action. */
+export interface AgentActionResult {
+  tool: string;
+  success: boolean;
+  message: string;
+  data?: unknown;
+}
+
 /**
  * Research chat — sends user message with full context (chat history,
  * notes, research topic, objective) and returns the assistant response.
+ *
+ * The LLM has access to site CRUD tools and can invoke them to update
+ * schemas, add context, create documents, etc. on behalf of the user.
  */
 export async function llmResearchChat(
   userMessage: string,
@@ -1362,8 +1470,9 @@ export async function llmResearchChat(
     whatIsObjective: string;
     chatHistory: ResearchChatMessage[];
     notes: string;
+    existingSchemas?: Array<{ id: number; name: string; description?: string }>;
   }
-): Promise<string> {
+): Promise<{ answer: string; actions: AgentActionResult[] }> {
   const openai = getClient();
 
   const contextParts: string[] = [];
@@ -1377,21 +1486,39 @@ export async function llmResearchChat(
   if (options.notes.trim()) {
     contextParts.push(`## User's Research Notes (built during this session)\n${options.notes}`);
   }
+  if (options.existingSchemas && options.existingSchemas.length > 0) {
+    const schemaList = options.existingSchemas
+      .map((s) => `  - ID ${s.id}: "${s.name}"${s.description ? ` — ${s.description}` : ""}`)
+      .join("\n");
+    contextParts.push(`## Existing Schemas in QueryFlow\n${schemaList}`);
+  }
 
-  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+  const messages: Array<OpenAI.Chat.Completions.ChatCompletionMessageParam> = [
     {
       role: "system",
-      content: `You are a focused research assistant. The user is conducting research on a specific topic with a defined objective. Help them explore, analyze, and understand the subject matter deeply.
+      content: `You are a focused research assistant with the ability to manage the user's QueryFlow workspace. The user is conducting research on a specific topic with a defined objective. Help them explore, analyze, and understand the subject matter deeply.
 
 ${contextParts.join("\n\n")}
 
-Guidelines:
-- Stay focused on the research topic and objective
-- Provide specific, detailed, and sourced information when possible
-- When the user asks follow-up questions, build on the prior conversation
-- Be thorough but concise — the user is building notes from your responses
-- If the user's question diverges from the research topic, gently redirect while still being helpful
-- Use markdown formatting for readability (headers, lists, bold, code blocks)`,
+## Your Capabilities
+You have access to tools that let you manage the user's QueryFlow workspace:
+- **create_schema**: When the user pastes database DDL, DESCRIBE output, or any schema content, use this to add it to their context. The content will be automatically parsed by the LLM schema parser.
+- **update_schema**: Update existing schema definitions.
+- **list_schemas**: Check what schemas already exist before creating duplicates.
+- **add_voice_context**: Add business-meaning annotations to schemas, tables, or columns. These are critical context sent to the query analyzer.
+- **create_document**: Save reference documents (guides, rules, notes) that get sent as context during analysis.
+- **create_query**: Save SQL queries to the workspace.
+
+## Guidelines
+- When the user pastes content that looks like schema/DDL/DESCRIBE output and asks to add it, use create_schema immediately. Pick a good descriptive name.
+- When the user wants to annotate a schema with business context, use add_voice_context.
+- Always use list_schemas first if you need to check what already exists before creating or updating.
+- Stay focused on the research topic and objective.
+- Provide specific, detailed, and sourced information when possible.
+- When the user asks follow-up questions, build on the prior conversation.
+- Be thorough but concise — the user is building notes from your responses.
+- Use markdown formatting for readability (headers, lists, bold, code blocks).
+- After performing an action, confirm what you did in your response.`,
     },
   ];
 
@@ -1403,13 +1530,53 @@ Guidelines:
   // Add the current user message
   messages.push({ role: "user", content: userMessage });
 
-  const response = await openai.chat.completions.create({
+  // First call — may return tool_calls
+  let response = await openai.chat.completions.create({
     model: MODEL,
     max_tokens: 8192,
     messages,
+    tools: AGENT_TOOLS,
   });
 
-  return extractText(response) || "Unable to process your research query.";
+  const actions: AgentActionResult[] = [];
+  let choice = response.choices[0];
+
+  // Tool-call loop: execute tools, feed results back, let LLM continue
+  // Limit iterations to prevent infinite loops
+  let iterations = 0;
+  const MAX_ITERATIONS = 5;
+
+  while (choice?.finish_reason === "tool_calls" && choice.message.tool_calls && iterations < MAX_ITERATIONS) {
+    iterations++;
+    // Append the assistant message with tool_calls
+    messages.push(choice.message);
+
+    // We'll collect pending action results — actual execution happens in the route handler
+    // For now, return the tool calls as pending actions
+    for (const tc of choice.message.tool_calls) {
+      actions.push({
+        tool: tc.function.name,
+        success: false, // will be set to true by the route handler
+        message: "pending",
+        data: JSON.parse(tc.function.arguments || "{}"),
+      });
+
+      // Add a placeholder tool result so the loop can continue
+      messages.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: JSON.stringify({ status: "pending", message: "Action will be executed by the server." }),
+      });
+    }
+
+    // Break out — actual execution is done server-side, we return actions to the caller
+    break;
+  }
+
+  // Extract the final text answer
+  const answer = choice?.message?.content || "";
+
+  return { answer, actions };
 }
 
 /**
