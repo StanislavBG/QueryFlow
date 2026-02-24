@@ -1153,7 +1153,7 @@ export default function Editor() {
   // --- left sidebar tab definitions ---
   const LEFT_TABS: Record<string, { icon: React.ElementType; label: string; tooltip: string }> = {
     queries: { icon: FileCode2, label: "Queries", tooltip: "Manage SQL queries" },
-    ask: { icon: MessageSquare, label: "Ask", tooltip: "Ask questions about your SQL" },
+    ask: { icon: MessageSquare, label: "Sage", tooltip: "Sage — your SQL knowledge advisor" },
     schemas: { icon: Table2, label: "Schemas", tooltip: "Manage schema definitions" },
   };
 
