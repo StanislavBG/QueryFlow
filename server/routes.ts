@@ -1100,10 +1100,12 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
         parsedDdl: z.string().optional(),
         tables: z.array(z.object({
           name: z.string(),
+          context: z.string().optional(),
           columns: z.array(z.object({
             name: z.string(),
             type: z.string(),
             isPrimaryKey: z.boolean(),
+            context: z.string().optional(),
           })),
           relationships: z.array(z.object({
             fromCol: z.string(),

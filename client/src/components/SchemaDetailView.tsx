@@ -4,7 +4,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Table2, Database, Key, Columns3, ChevronLeft, ArrowRight, Plus, Check, X, Pencil, Trash2, Upload, FileText, Loader2 } from "lucide-react";
+import { Table2, Database, Key, Columns3, ChevronLeft, ArrowRight, Plus, Check, X, Pencil, Trash2, Upload, FileText, Loader2, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { VoiceContextButton } from "@/components/VoiceContextButton";
@@ -263,6 +263,12 @@ function SchemaOverview({
                 onClick={() => onNavigate?.({ schemaId: schema.id, tableName: table.name })}
                 className="w-full p-2 text-left"
               >
+                {table.context && (
+                  <div className="flex items-start gap-1.5 text-[10px] py-1 mb-1 border-b border-dashed border-violet-500/20">
+                    <Info className="w-2.5 h-2.5 text-violet-400 flex-shrink-0 mt-0.5" />
+                    <span className="text-violet-400/80 italic line-clamp-2">{table.context}</span>
+                  </div>
+                )}
                 {sorted.slice(0, 5).map((col) => (
                   <div key={col.name} className="flex items-center gap-1.5 text-[10px] py-[1px]">
                     {col.isPrimaryKey ? (
@@ -271,6 +277,9 @@ function SchemaOverview({
                       <Columns3 className="w-2.5 h-2.5 text-muted-foreground/30 flex-shrink-0" />
                     )}
                     <span className="font-mono text-muted-foreground truncate">{col.name}</span>
+                    {col.context && (
+                      <Info className="w-2 h-2 text-violet-400/60 flex-shrink-0" />
+                    )}
                     {col.type && (
                       <span className="text-[9px] text-muted-foreground/40 ml-auto font-mono">{col.type}</span>
                     )}
@@ -412,9 +421,12 @@ function TableDetail({
 
   const [isEditingTableName, setIsEditingTableName] = useState(false);
   const [editTableName, setEditTableName] = useState(table.name);
+  const [isEditingTableContext, setIsEditingTableContext] = useState(false);
+  const [editTableContext, setEditTableContext] = useState(table.context ?? "");
 
-  // Sync edit state when table.name changes externally
+  // Sync edit state when table changes externally
   useEffect(() => { setEditTableName(table.name); }, [table.name]);
+  useEffect(() => { setEditTableContext(table.context ?? ""); }, [table.context]);
 
   const handleSaveTableName = useCallback(() => {
     const trimmed = editTableName.trim();
@@ -449,6 +461,48 @@ function TableDetail({
       }
     );
   }, [editTableName, table.name, allTables, schema.id, updateMutation, toast, onNavigate]);
+
+  const handleSaveTableContext = useCallback(() => {
+    const trimmed = editTableContext.trim();
+    if (trimmed === (table.context ?? "")) {
+      setIsEditingTableContext(false);
+      return;
+    }
+    const updatedTables = allTables.map((t) =>
+      t.name === table.name ? { ...t, context: trimmed || undefined } : t
+    );
+    updateMutation.mutate(
+      { id: schema.id, data: { tables: updatedTables } },
+      {
+        onSuccess: () => {
+          setIsEditingTableContext(false);
+          toast({ title: "Table context updated" });
+        },
+        onError: () => toast({ title: "Failed to update context", variant: "destructive" }),
+      }
+    );
+  }, [editTableContext, table.context, table.name, allTables, schema.id, updateMutation, toast]);
+
+  const handleSaveColumnContext = useCallback((colName: string, newContext: string) => {
+    const trimmed = newContext.trim();
+    const updatedTables = allTables.map((t) =>
+      t.name === table.name
+        ? {
+            ...t,
+            columns: t.columns.map((c) =>
+              c.name === colName ? { ...c, context: trimmed || undefined } : c
+            ),
+          }
+        : t
+    );
+    updateMutation.mutate(
+      { id: schema.id, data: { tables: updatedTables } },
+      {
+        onSuccess: () => toast({ title: "Column context updated" }),
+        onError: () => toast({ title: "Failed to update context", variant: "destructive" }),
+      }
+    );
+  }, [table.name, allTables, schema.id, updateMutation, toast]);
 
   const handleAddColumn = useCallback(() => {
     const colName = uniqueName("new_field_", table.columns.map((c) => c.name));
@@ -536,6 +590,49 @@ function TableDetail({
         />
       </div>
 
+      {/* Table context — system metadata */}
+      <div className="rounded-lg border border-dashed border-violet-500/30 bg-violet-500/5 overflow-hidden">
+        <div className="px-3 py-1.5 border-b border-violet-500/20 flex items-center gap-2">
+          <Info className="w-3 h-3 text-violet-400 flex-shrink-0" />
+          <p className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider flex-1">Table Context</p>
+          <Badge variant="outline" className="text-[8px] h-4 border-violet-500/30 text-violet-400">system</Badge>
+        </div>
+        {isEditingTableContext ? (
+          <div className="p-3 space-y-2">
+            <Textarea
+              value={editTableContext}
+              onChange={(e) => setEditTableContext(e.target.value)}
+              placeholder="Describe this table's business purpose, what it stores, how it relates to other tables..."
+              className="text-xs min-h-[60px] max-h-[150px] border-violet-500/20 focus-visible:ring-violet-500/30"
+              autoFocus
+            />
+            <div className="flex items-center gap-1.5">
+              <Button size="sm" className="h-6 text-[10px] gap-1 bg-violet-600 hover:bg-violet-700" onClick={handleSaveTableContext} disabled={updateMutation.isPending}>
+                {updateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                Save
+              </Button>
+              <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setIsEditingTableContext(false); setEditTableContext(table.context ?? ""); }}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setIsEditingTableContext(true)}
+            className="w-full p-3 text-left hover:bg-violet-500/5 transition-colors group/ctx"
+          >
+            {table.context ? (
+              <div className="flex items-start gap-2">
+                <p className="text-xs text-violet-300/80 italic flex-1">{table.context}</p>
+                <Pencil className="w-3 h-3 text-violet-400/50 opacity-0 group-hover/ctx:opacity-100 transition-opacity flex-shrink-0 mt-0.5" />
+              </div>
+            ) : (
+              <p className="text-[11px] text-violet-400/40 italic">Click to add table context...</p>
+            )}
+          </button>
+        )}
+      </div>
+
       {/* Column listing */}
       <div className="rounded-lg border border-border overflow-hidden">
         <div className="px-3 py-1.5 bg-muted/30 border-b border-border flex items-center gap-2">
@@ -550,37 +647,47 @@ function TableDetail({
           {sortedColumns.map((col, ci) => {
             const isFK = outgoing.some((r) => r.fromCol.toLowerCase() === col.name.toLowerCase());
             return (
-              <div
-                key={col.name}
-                role="button"
-                tabIndex={0}
-                onClick={() => onNavigate?.({ schemaId: schema.id, tableName: table.name, columnName: col.name })}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onNavigate?.({ schemaId: schema.id, tableName: table.name, columnName: col.name }); } }}
-                className="flex items-center gap-3 px-3 py-2 pr-10 hover:bg-accent/30 transition-colors cursor-pointer"
-              >
-                {col.isPrimaryKey ? (
-                  <Key className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
-                ) : isFK ? (
-                  <Key className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
-                ) : (
-                  <Columns3 className="w-3.5 h-3.5 text-muted-foreground/30 flex-shrink-0" />
+              <div key={col.name} className="group/col">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onNavigate?.({ schemaId: schema.id, tableName: table.name, columnName: col.name })}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onNavigate?.({ schemaId: schema.id, tableName: table.name, columnName: col.name }); } }}
+                  className="flex items-center gap-3 px-3 py-2 pr-10 hover:bg-accent/30 transition-colors cursor-pointer"
+                >
+                  {col.isPrimaryKey ? (
+                    <Key className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                  ) : isFK ? (
+                    <Key className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+                  ) : (
+                    <Columns3 className="w-3.5 h-3.5 text-muted-foreground/30 flex-shrink-0" />
+                  )}
+                  <span className={`text-xs font-mono flex-1 ${col.isPrimaryKey ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
+                    {col.name}
+                  </span>
+                  {col.context && (
+                    <Info className="w-3 h-3 text-violet-400/60 flex-shrink-0" />
+                  )}
+                  {col.type && (
+                    <Badge variant="outline" className="text-[9px] h-5 font-mono">{col.type}</Badge>
+                  )}
+                  {col.isPrimaryKey && <Badge className="text-[9px] h-5 bg-amber-500/10 text-amber-600 border-amber-500/20">PK</Badge>}
+                  {isFK && <Badge className="text-[9px] h-5 bg-blue-500/10 text-blue-400 border-blue-500/20">FK</Badge>}
+                  <VoiceContextButton
+                    schemaId={schema.id}
+                    targetType="column"
+                    targetTable={table.name}
+                    targetColumn={col.name}
+                    existingContext={findVoiceContext(voiceContexts, "column", table.name, col.name)}
+                    size="sm"
+                  />
+                </div>
+                {col.context && (
+                  <div className="px-3 pb-2 pl-10 flex items-start gap-1.5">
+                    <Info className="w-2.5 h-2.5 text-violet-400/40 flex-shrink-0 mt-0.5" />
+                    <p className="text-[10px] text-violet-400/60 italic line-clamp-2">{col.context}</p>
+                  </div>
                 )}
-                <span className={`text-xs font-mono flex-1 ${col.isPrimaryKey ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
-                  {col.name}
-                </span>
-                {col.type && (
-                  <Badge variant="outline" className="text-[9px] h-5 font-mono">{col.type}</Badge>
-                )}
-                {col.isPrimaryKey && <Badge className="text-[9px] h-5 bg-amber-500/10 text-amber-600 border-amber-500/20">PK</Badge>}
-                {isFK && <Badge className="text-[9px] h-5 bg-blue-500/10 text-blue-400 border-blue-500/20">FK</Badge>}
-                <VoiceContextButton
-                  schemaId={schema.id}
-                  targetType="column"
-                  targetTable={table.name}
-                  targetColumn={col.name}
-                  existingContext={findVoiceContext(voiceContexts, "column", table.name, col.name)}
-                  size="sm"
-                />
               </div>
             );
           })}
@@ -633,18 +740,55 @@ function ColumnDetail({
   schema,
   table,
   column,
+  allTables,
   voiceContexts,
   onNavigate,
 }: {
   schema: { id: number; name: string };
   table: ParsedTable;
   column: ParsedColumn;
+  allTables: ParsedTable[];
   voiceContexts?: SchemaVoiceContext[];
   onNavigate?: (selection: SchemaSelection | null) => void;
 }) {
   const outgoing = (table.relationships || []).filter(
     (r) => r.fromCol.toLowerCase() === column.name.toLowerCase()
   );
+
+  const updateMutation = useUpdateUserSchema();
+  const { toast } = useToast();
+  const [isEditingContext, setIsEditingContext] = useState(false);
+  const [editContext, setEditContext] = useState(column.context ?? "");
+
+  useEffect(() => { setEditContext(column.context ?? ""); }, [column.context]);
+
+  const handleSaveContext = useCallback(() => {
+    const trimmed = editContext.trim();
+    if (trimmed === (column.context ?? "")) {
+      setIsEditingContext(false);
+      return;
+    }
+    const updatedTables = allTables.map((t) =>
+      t.name === table.name
+        ? {
+            ...t,
+            columns: t.columns.map((c) =>
+              c.name === column.name ? { ...c, context: trimmed || undefined } : c
+            ),
+          }
+        : t
+    );
+    updateMutation.mutate(
+      { id: schema.id, data: { tables: updatedTables } },
+      {
+        onSuccess: () => {
+          setIsEditingContext(false);
+          toast({ title: "Column context updated" });
+        },
+        onError: () => toast({ title: "Failed to update context", variant: "destructive" }),
+      }
+    );
+  }, [editContext, column.context, column.name, table.name, allTables, schema.id, updateMutation, toast]);
 
   return (
     <div className="p-6 space-y-6">
@@ -723,6 +867,49 @@ function ColumnDetail({
         </div>
       </div>
 
+      {/* Column context — system metadata */}
+      <div className="rounded-lg border border-dashed border-violet-500/30 bg-violet-500/5 overflow-hidden">
+        <div className="px-3 py-1.5 border-b border-violet-500/20 flex items-center gap-2">
+          <Info className="w-3 h-3 text-violet-400 flex-shrink-0" />
+          <p className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider flex-1">Column Context</p>
+          <Badge variant="outline" className="text-[8px] h-4 border-violet-500/30 text-violet-400">system</Badge>
+        </div>
+        {isEditingContext ? (
+          <div className="p-3 space-y-2">
+            <Textarea
+              value={editContext}
+              onChange={(e) => setEditContext(e.target.value)}
+              placeholder="Describe this column's meaning, valid values, business logic..."
+              className="text-xs min-h-[60px] max-h-[150px] border-violet-500/20 focus-visible:ring-violet-500/30"
+              autoFocus
+            />
+            <div className="flex items-center gap-1.5">
+              <Button size="sm" className="h-6 text-[10px] gap-1 bg-violet-600 hover:bg-violet-700" onClick={handleSaveContext} disabled={updateMutation.isPending}>
+                {updateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                Save
+              </Button>
+              <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setIsEditingContext(false); setEditContext(column.context ?? ""); }}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setIsEditingContext(true)}
+            className="w-full p-3 text-left hover:bg-violet-500/5 transition-colors group/ctx"
+          >
+            {column.context ? (
+              <div className="flex items-start gap-2">
+                <p className="text-xs text-violet-300/80 italic flex-1">{column.context}</p>
+                <Pencil className="w-3 h-3 text-violet-400/50 opacity-0 group-hover/ctx:opacity-100 transition-opacity flex-shrink-0 mt-0.5" />
+              </div>
+            ) : (
+              <p className="text-[11px] text-violet-400/40 italic">Click to add column context...</p>
+            )}
+          </button>
+        )}
+      </div>
+
       {/* Relationships involving this column */}
       {outgoing.length > 0 && (
         <div className="rounded-lg border border-border overflow-hidden">
@@ -788,6 +975,7 @@ export function SchemaDetailView({ selection, onNavigate }: SchemaDetailViewProp
           schema={schemaWithMeta}
           table={table}
           column={column}
+          allTables={tables}
           voiceContexts={voiceContexts}
           onNavigate={onNavigate}
         />

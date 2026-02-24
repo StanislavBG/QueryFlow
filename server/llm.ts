@@ -649,7 +649,7 @@ export async function llmParseSchema(
         role: "user",
         content: `You are a schema-extraction agent. A user uploaded content from file "${fileName}". Your ONLY job: find every database table and column in this content and return a single structured JSON object.
 
-The content can be in ANY format — database client output (e.g. MySQL DESCRIBE, \\d output), SQL DDL, spreadsheets, CSV, JSON, documentation, anything. Figure out what it is and extract the schema.
+The content can be in ANY format — database client output (e.g. MySQL DESCRIBE, \\d output), SQL DDL, spreadsheets, CSV, JSON, documentation, free-form text with table/column descriptions, anything. Figure out what it is and extract the schema.
 
 RULES:
 - Strip schema/database prefixes from table names (e.g. "mydb.orders" → "orders", "gsm.temp_table" → "temp_table")
@@ -660,13 +660,21 @@ RULES:
 - Ignore non-schema content (USE statements, SHOW commands, comments, etc.)
 - Output ONLY the JSON object below — no explanation, no markdown fences, no other text
 
+CONTEXT EXTRACTION — this is critical:
+- If the input contains descriptive text about a table (what it stores, its business purpose, how it relates to other tables), capture it verbatim in that table's "context" field.
+- If the input contains descriptive text about a column (what it means, valid values, business logic, usage notes), capture it verbatim in that column's "context" field.
+- Context can appear as inline comments (-- ...), text after a dash (- description), prose paragraphs describing tables, column annotations, or any human-readable description adjacent to schema elements.
+- Preserve the user's original wording — do not paraphrase or summarize. The analyst wrote it deliberately.
+- If no context/description is provided for a table or column, omit the "context" field (do not set it to empty string).
+
 OUTPUT FORMAT — a single JSON object:
 {
   "tables": [
     {
       "name": "table_name",
+      "context": "Business description of what this table stores and its purpose",
       "columns": [
-        {"name": "col_name", "type": "VARCHAR(255)", "isPrimaryKey": true}
+        {"name": "col_name", "type": "VARCHAR(255)", "isPrimaryKey": true, "context": "Description of what this column means"}
       ],
       "relationships": [
         {"fromCol": "user_id", "toTable": "users", "toCol": "id"}
@@ -740,10 +748,12 @@ ${rawContent}`,
     .filter((t) => typeof t.name === "string" && (t.name as string).length > 0 && Array.isArray(t.columns))
     .map((t) => ({
       name: t.name as string,
+      ...(typeof t.context === "string" && (t.context as string).trim() ? { context: (t.context as string).trim() } : {}),
       columns: (t.columns as Array<Record<string, unknown>>).map((c) => ({
         name: String(c.name || ""),
         type: String(c.type || ""),
         isPrimaryKey: !!c.isPrimaryKey,
+        ...(typeof c.context === "string" && (c.context as string).trim() ? { context: (c.context as string).trim() } : {}),
       })),
       relationships: Array.isArray(t.relationships)
         ? (t.relationships as Array<Record<string, unknown>>).map((r) => ({
@@ -1106,14 +1116,20 @@ function validateEdges(raw: unknown[], nodeIds: Set<string>): WaterfallEdge[] {
         nodeIds.has(String(e.fromNodeId)) &&
         nodeIds.has(String(e.toNodeId))
     )
-    .map((e) => ({
-      id: String(e.id),
-      fromNodeId: String(e.fromNodeId),
-      toNodeId: String(e.toNodeId),
-      edgeType: normalizeEdgeType(e.edgeType),
-      sqlStatement: String(e.sqlStatement || ""),
-      joinDetails: e.joinDetails ? String(e.joinDetails) : undefined,
-    }));
+    .map((e) => {
+      const sqlStatement = String(e.sqlStatement || "");
+      if (sqlStatement.includes("...")) {
+        console.warn(`[waterfall] Edge ${e.id} has abbreviated SQL (contains "..."). LLM ignored the no-abbreviation rule. SQL: ${sqlStatement.slice(0, 200)}`);
+      }
+      return {
+        id: String(e.id),
+        fromNodeId: String(e.fromNodeId),
+        toNodeId: String(e.toNodeId),
+        edgeType: normalizeEdgeType(e.edgeType),
+        sqlStatement,
+        joinDetails: e.joinDetails ? String(e.joinDetails) : undefined,
+      };
+    });
 }
 
 /**
@@ -1150,8 +1166,8 @@ For each edge provide:
 - fromNodeId: must be one of the node IDs listed above
 - toNodeId: must be one of the node IDs listed above
 - edgeType: one of the edge types above
-- sqlStatement: the FULL, COMPLETE, UNTRUNCATED verbatim SQL clause from the user's input for this data movement. Never abbreviate, never use "...", never summarize. Copy the ENTIRE clause exactly as written.
-- joinDetails: for JOIN edges only, the full ON condition verbatim
+- sqlStatement: the FULL, COMPLETE, UNTRUNCATED verbatim SQL clause from the user's input for this data movement. Never abbreviate, never use "...", never summarize, never use ellipsis or placeholders. Copy the ENTIRE clause exactly as written character-for-character. If the clause is 200 lines, include all 200 lines. Abbreviation is a critical defect that makes the output INVALID.
+- joinDetails: for JOIN edges only, the full ON condition verbatim (no "..." or abbreviation)
 
 Every node must have at least one edge. Return ONLY a JSON array: [{"id":"edge_0",...},...]`,
       },
@@ -1199,11 +1215,12 @@ Rules:
 - stepIndex: 0 for source tables, increment for each transformation layer. Same stepIndex = side-by-side.
 - Correctly identify node types: CTEs should be "cte", temp tables (#temp/CREATE TEMP) should be "temp_table", subqueries in FROM should be "derived_table", and the final result should be "final_output". Only base tables from the database should be "source_table".
 - For JOINs of N sources into 1 destination: one edge per source, same sqlStatement.
-- sqlStatement: MUST be the FULL, COMPLETE, UNTRUNCATED verbatim SQL from the user's input that corresponds to that data movement. Copy the ENTIRE relevant clause — never abbreviate, never use "...", never summarize, never replace parts with ellipsis or placeholders. Include every column, condition, and expression exactly as written. The right panel has plenty of space — the user needs to see and verify the exact SQL.
-- joinDetails: for JOIN edges only, the ON condition (also full and verbatim).
+- sqlStatement: MUST be the FULL, COMPLETE, UNTRUNCATED verbatim SQL from the user's input that corresponds to that data movement. Copy the ENTIRE relevant clause character-for-character — never abbreviate, never use "...", never summarize, never replace parts with ellipsis or placeholders. Include every column, every condition, every expression, every keyword exactly as written. The right panel has plenty of space — the user needs to see and verify the exact SQL. If an edge's SQL is 500 lines long, include all 500 lines. Abbreviation is a critical defect.
+- joinDetails: for JOIN edges only, the ON condition (also full and verbatim, no "...").
 - IDs: "node_0","node_1"... and "edge_0","edge_1"...
 - Every node must have at least one edge.
 - CRITICAL: The edges array is essential. Always generate the complete edges array with full verbatim SQL in every edge.
+- ABSOLUTE RULE: If any sqlStatement or joinDetails field contains "..." or any form of abbreviation/ellipsis/placeholder, the entire response is INVALID. The user is a senior SQL analyst who verifies every character. Abbreviated SQL destroys their trust in the tool.
 
 Return ONLY JSON:
 {"nodes":[...],"edges":[...],"summary":"brief description"}`;
