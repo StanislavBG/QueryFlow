@@ -1134,7 +1134,7 @@ async function recoverWaterfallEdges(
 
   const response = await ai.chat.completions.create({
     model: MODEL,
-    max_tokens: 16384,
+    max_tokens: 32768,
     messages: [
       {
         role: "system",
@@ -1150,8 +1150,8 @@ For each edge provide:
 - fromNodeId: must be one of the node IDs listed above
 - toNodeId: must be one of the node IDs listed above
 - edgeType: one of the edge types above
-- sqlStatement: the KEY SQL clause for this data movement (the JOIN, SELECT FROM, INSERT INTO, etc.)
-- joinDetails: for JOIN edges only, the ON condition
+- sqlStatement: the FULL, COMPLETE, UNTRUNCATED verbatim SQL clause from the user's input for this data movement. Never abbreviate, never use "...", never summarize. Copy the ENTIRE clause exactly as written.
+- joinDetails: for JOIN edges only, the full ON condition verbatim
 
 Every node must have at least one edge. Return ONLY a JSON array: [{"id":"edge_0",...},...]`,
       },
@@ -1189,14 +1189,6 @@ export async function llmAnalyzeWaterfall(
     ? `\n\nKnown database schema:\n${options.schemas}`
     : "";
 
-  // For large queries, adapt the prompt to prioritize graph completeness
-  // over full verbatim SQL in each edge (prevents token-limit truncation).
-  const isLargeQuery = sql.length > 4000;
-
-  const sqlStatementRule = isLargeQuery
-    ? `- sqlStatement: Provide the KEY SQL clause that defines this data movement (the JOIN, SELECT FROM, INSERT INTO SELECT, etc.). Include the core clause with conditions, but you may summarize very long column lists. Prioritize generating ALL edges over including complete SQL text.`
-    : `- sqlStatement: MUST be the FULL, COMPLETE, UNTRUNCATED verbatim SQL from the user's input that corresponds to that data movement. Copy the ENTIRE relevant clause — never abbreviate, never use "...", never summarize, never replace parts with ellipsis or placeholders. Include every column, condition, and expression exactly as written. This is critical — the user needs to see and verify the exact SQL.`;
-
   const systemPrompt = `Decompose the SQL into a DAG of data flow. ${dialectHint}${schemaHint}
 
 Node types: "source_table" (base tables in FROM/JOIN), "cte" (WITH AS), "temp_table" (#temp/CREATE TEMP), "derived_table" (subquery in FROM), "final_output" (final SELECT or target INSERT table).
@@ -1207,11 +1199,11 @@ Rules:
 - stepIndex: 0 for source tables, increment for each transformation layer. Same stepIndex = side-by-side.
 - Correctly identify node types: CTEs should be "cte", temp tables (#temp/CREATE TEMP) should be "temp_table", subqueries in FROM should be "derived_table", and the final result should be "final_output". Only base tables from the database should be "source_table".
 - For JOINs of N sources into 1 destination: one edge per source, same sqlStatement.
-${sqlStatementRule}
+- sqlStatement: MUST be the FULL, COMPLETE, UNTRUNCATED verbatim SQL from the user's input that corresponds to that data movement. Copy the ENTIRE relevant clause — never abbreviate, never use "...", never summarize, never replace parts with ellipsis or placeholders. Include every column, condition, and expression exactly as written. The right panel has plenty of space — the user needs to see and verify the exact SQL.
 - joinDetails: for JOIN edges only, the ON condition (also full and verbatim).
 - IDs: "node_0","node_1"... and "edge_0","edge_1"...
 - Every node must have at least one edge.
-- CRITICAL: The edges array is essential. Always generate the complete edges array. If the query is very large, keep sqlStatement values concise to ensure all edges fit in the response.
+- CRITICAL: The edges array is essential. Always generate the complete edges array with full verbatim SQL in every edge.
 
 Return ONLY JSON:
 {"nodes":[...],"edges":[...],"summary":"brief description"}`;
@@ -1291,3 +1283,4 @@ Return ONLY JSON:
     summary: typeof raw.summary === "string" ? raw.summary : "",
   };
 }
+
