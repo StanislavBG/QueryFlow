@@ -20,12 +20,13 @@ import {
 } from "@/components/ui/resizable";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, Plus, X, Boxes, Shield, Play, PlayCircle, Sparkles, AlertCircle, Mic, Key, Columns3, Lock, ExternalLink, Scale, Terminal, Trash2, Copy, ChevronDown, ChevronUp } from "lucide-react";
+import { FileCode2, Loader2, Database, Sun, Moon, MessageSquare, Table2, Plus, X, Boxes, Shield, Play, PlayCircle, Sparkles, AlertCircle, Mic, Key, Columns3, Lock, ExternalLink, Scale, Terminal, Trash2, Copy, ChevronDown, ChevronUp, CreditCard } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 
 import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
+import { PricingPage } from "@/components/PricingPage";
 import { useCurrentUser } from "@/hooks/use-admin";
 import { useLocation } from "wouter";
 import {
@@ -1276,7 +1277,14 @@ export default function Editor() {
             </SignInButton>
           </SignedOut>
           <SignedIn>
-            <UserButton />
+            <UserButton>
+              <UserButton.MenuItems>
+                <UserButton.Action label="Pricing" labelIcon={<CreditCard className="w-4 h-4" />} open="pricing" />
+              </UserButton.MenuItems>
+              <UserButton.UserProfilePage label="Pricing" labelIcon={<CreditCard className="w-4 h-4" />} url="pricing">
+                <PricingPage />
+              </UserButton.UserProfilePage>
+            </UserButton>
           </SignedIn>
         </div>
       </header>

@@ -56,6 +56,10 @@ Preferred communication style: Simple, everyday language.
   - `PUT /api/sql-queries/:id/waterfall` — Save user-modified waterfall analysis data
   - `POST /api/demo/bootstrap` — Return the pre-seeded demo version (schema + flawed query + pre-generated feedback + waterfall). No auth required, no DB writes, zero LLM calls per visitor
   - `POST /api/demo/seed` — Admin-only: generate and store the single Bookstore demo scenario with pre-generated analysis feedback and waterfall data
+  - `GET /api/stripe/config` — Return available Stripe products/prices (auth required)
+  - `POST /api/stripe/create-checkout-session` — Create Stripe Checkout session and redirect URL (auth required)
+  - `POST /api/stripe/webhook` — Stripe webhook handler (signature verification, no Clerk auth)
+  - `GET /api/stripe/payments` — User's payment history (auth required)
 
 ### Data Storage
 - **Database**: PostgreSQL via `DATABASE_URL` environment variable
@@ -73,6 +77,7 @@ Preferred communication style: Simple, everyday language.
   - `app_users` — Clerk-synced user records with roles (admin/user)
   - `activity_events` — Behavioral analytics events with metadata JSONB
   - `demo_versions` — Pre-generated demo content (schema DDL + flawed query + feedback_data JSONB + waterfall_data JSONB) for fast, cost-free demo bootstrap with instant analysis display
+  - `payments` — Stripe checkout payment records (user_id, stripe_session_id, stripe_customer_id, stripe_payment_intent_id, product_id, price_id, amount, currency, status, timestamps). Indexed on user_id and stripe_session_id
 
 ### Build System
 - **Development**: `npm run dev` — tsx runs server which sets up Vite dev server with HMR
@@ -96,11 +101,16 @@ Preferred communication style: Simple, everyday language.
 - `DATABASE_URL` — PostgreSQL connection string (required, app crashes without it)
 - `VITE_CLERK_PUBLISHABLE_KEY` — Clerk publishable key for frontend auth
 - `ANTHROPIC_API_KEY` — Anthropic API key for Claude LLM features (optional; LLM features gracefully degrade if missing)
+- `STRIPE_SECRET_KEY_PROD` — Stripe server-side secret key for payments (optional; Stripe endpoints return 503 if missing)
+- `STRIPE_PUBLISHABLE_KEY_PROD` — Stripe client-facing publishable key (reserved for future use)
+- `STRIPE_WEBHOOK_SECRET` — Stripe webhook signature verification secret (starts with `whsec_`)
+- `STRIPE_BUY_COFFEE_PRICE_ID` — Stripe Price ID for the default product (optional)
 
 ### Third-Party Services
 - **Clerk** — Authentication and user management (both frontend and backend SDKs)
 - **Anthropic Claude** — AI-powered SQL formatting, analysis, chat, and schema parsing (model: claude-opus-4-6-20250918)
 - **PostgreSQL** — Primary database (provisioned via Replit or external provider)
+- **Stripe** — Payment processing via Checkout Sessions (server-side SDK, webhook for fulfillment)
 
 ### Key NPM Dependencies
 - `drizzle-orm` — Database ORM for type-safe queries only (no CLI/migration companion package)
@@ -112,6 +122,7 @@ Preferred communication style: Simple, everyday language.
 - `wouter` — Client-side routing
 - `date-fns` — Date formatting
 - `lucide-react` — Icon library
+- `stripe` — Stripe server-side SDK for payments
 
 ## Deployment (Replit)
 
