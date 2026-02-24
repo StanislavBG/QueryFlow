@@ -156,7 +156,7 @@ export function AskModule({ queryContent, dialect }: AskModuleProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="p-3 border-b border-border flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Oracle</h3>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sage</h3>
         {localMessages.length > 0 && (
           <Button
             variant="ghost"
@@ -180,7 +180,7 @@ export function AskModule({ queryContent, dialect }: AskModuleProps) {
           ) : qaPairs.length === 0 && !askMutation.isPending ? (
             <div className="text-center py-8 px-3">
               <Bot className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
-              <p className="text-xs text-muted-foreground mb-2">Ask Oracle about your SQL query, schema, or general SQL topics.</p>
+              <p className="text-xs text-muted-foreground mb-2">Ask Sage about your SQL query, schema, or general SQL topics.</p>
               <div className="space-y-1">
                 {["What indexes would help this query?", "Explain the JOIN logic", "How can I optimize this?"].map((ex) => (
                   <button
@@ -263,7 +263,7 @@ export function AskModule({ queryContent, dialect }: AskModuleProps) {
                 handleSend();
               }
             }}
-            placeholder="Ask Oracle a question..."
+            placeholder="Ask Sage a question..."
             className="min-h-[36px] max-h-[80px] text-xs resize-none"
             rows={1}
           />
