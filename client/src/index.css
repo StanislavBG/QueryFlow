@@ -150,3 +150,35 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground));
 }
+
+/* ── Clerk component overrides ───────────────────────────────────── */
+/* Match the site's card/border/shadow treatment so Clerk panels
+   look native rather than third-party. */
+.cl-card {
+  border: 1px solid hsl(var(--border)) !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1) !important;
+}
+.dark .cl-card {
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4) !important;
+}
+.cl-navbar {
+  border-right: 1px solid hsl(var(--border)) !important;
+}
+.cl-navbarButton {
+  border-radius: 0.375rem !important;
+  font-size: 0.875rem !important;
+}
+.cl-userButtonPopoverCard {
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: 0.5rem !important;
+}
+/* Ensure text inputs inside Clerk match site inputs */
+.cl-formFieldInput {
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: 0.375rem !important;
+  font-size: 0.875rem !important;
+}
+.cl-formFieldInput:focus {
+  border-color: hsl(var(--ring)) !important;
+  box-shadow: 0 0 0 1px hsl(var(--ring)) !important;
+}
