@@ -1015,6 +1015,20 @@ export default function Editor() {
 
   const [leftTab, setLeftTab] = useState<LeftTabKey>("queries");
 
+  // Auto-switch to schemas tab when user has no schemas (first-time upload experience)
+  const hasAutoSwitchedToSchemas = useRef(false);
+  useEffect(() => {
+    if (
+      !hasAutoSwitchedToSchemas.current &&
+      !showOnboarding &&
+      schemas &&
+      schemas.length === 0
+    ) {
+      setLeftTab("schemas");
+      hasAutoSwitchedToSchemas.current = true;
+    }
+  }, [schemas, showOnboarding]);
+
   // Auto-select first query if none selected
   useEffect(() => {
     if (!selectedQueryId && queries && queries.length > 0 && !queriesLoading) {
