@@ -188,8 +188,11 @@ export function useAnalyzeQuery() {
         queryClient.invalidateQueries({ queryKey: ["feedback", queryId] });
         queryClient.invalidateQueries({ queryKey: ["waterfall-data", queryId] });
       } else {
-        // Demo mode: seed feedback cache directly (no DB persistence)
+        // Demo mode: seed feedback and waterfall cache directly (no DB persistence)
         queryClient.setQueryData(["feedback", queryId], result.feedback);
+        if (result.waterfall?.analysis) {
+          queryClient.setQueryData(["waterfall-data", queryId], result.waterfall.analysis);
+        }
       }
     },
     onError: () => {
