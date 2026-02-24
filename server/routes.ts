@@ -44,7 +44,7 @@ export const CATEGORY_DESCRIPTIONS: Record<AnalysisCategory, { name: string; des
 
 import type { UserSchema, ParsedTable, ParsedColumn, ParsedRelationship } from "@shared/schema";
 
-/** Build schema context string for LLM prompts, including descriptions and voice annotations as SQL comments. */
+/** Build schema context string for LLM prompts, including descriptions, inline context, and voice annotations as SQL comments. */
 async function buildSchemaContext(schemas: UserSchema[]): Promise<string | undefined> {
   if (schemas.length === 0) return undefined;
   const parts: string[] = [];
@@ -55,6 +55,19 @@ async function buildSchemaContext(schemas: UserSchema[]): Promise<string | undef
       schemaParts.push(s.description.split('\n').map(l => `-- ${l}`).join('\n'));
     }
     if (s.parsedDdl) schemaParts.push(s.parsedDdl);
+
+    // Include inline context from parsed tables/columns
+    const tables = Array.isArray(s.tables) ? (s.tables as ParsedTable[]) : [];
+    for (const t of tables) {
+      if (t.context) {
+        schemaParts.push(`-- Context for table "${t.name}": ${t.context}`);
+      }
+      for (const c of t.columns || []) {
+        if (c.context) {
+          schemaParts.push(`-- Context for column "${t.name}.${c.name}": ${c.context}`);
+        }
+      }
+    }
 
     // Append voice context annotations for this schema
     const voiceContexts = await storage.getSchemaVoiceContexts(s.id);
@@ -776,18 +789,55 @@ export async function registerRoutes(
       const { userId: askUserId } = getAuth(req);
       logActivity(askUserId, "chat.ask", "chat");
 
-      // Gather schema context (includes voice annotations)
+      // Gather schema context (includes inline context + voice annotations)
       const schemas = await storage.getUserSchemas();
       const schemaContext = await buildSchemaContext(schemas);
 
-      const answer = await llmAskQuestion(
+      const result = await llmAskQuestion(
         input.question,
         input.queryContent,
         schemaContext,
         input.dialect
       );
 
-      res.json({ answer });
+      // If the Sage returned context updates, apply them to matching schemas
+      if (result.contextUpdates && result.contextUpdates.length > 0) {
+        for (const schema of schemas) {
+          const tables = Array.isArray(schema.tables) ? (schema.tables as ParsedTable[]) : [];
+          let modified = false;
+
+          const updatedTables = tables.map((t) => {
+            const update = result.contextUpdates!.find(
+              (u) => u.tableName.toLowerCase() === t.name.toLowerCase()
+            );
+            if (!update) return t;
+            modified = true;
+
+            let updatedColumns = t.columns;
+            if (update.columnContexts && update.columnContexts.length > 0) {
+              updatedColumns = t.columns.map((c) => {
+                const colUpdate = update.columnContexts!.find(
+                  (cc) => cc.columnName.toLowerCase() === c.name.toLowerCase()
+                );
+                return colUpdate ? { ...c, context: colUpdate.context } : c;
+              });
+            }
+
+            return {
+              ...t,
+              ...(update.tableContext ? { context: update.tableContext } : {}),
+              columns: updatedColumns,
+            };
+          });
+
+          if (modified) {
+            await storage.updateUserSchema(schema.id, { tables: updatedTables as any });
+            logActivity(askUserId, "schema.contextUpdate", "schema", schema.id);
+          }
+        }
+      }
+
+      res.json({ answer: result.answer, contextUpdated: !!(result.contextUpdates?.length) });
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
