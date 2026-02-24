@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo } from "react";
-import { useUserSchemas, useCreateUserSchema, useDeleteUserSchema, useUpdateUserSchema, useSchemaVoiceContexts } from "@/hooks/use-sql-queries";
+import { useUserSchemas, useCreateUserSchema, useDeleteUserSchema, useUpdateUserSchema, useAddTablesToSchema, useSchemaVoiceContexts } from "@/hooks/use-sql-queries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -109,6 +109,7 @@ function SchemaTreeNode({
   onToggleSchema,
   onToggleTable,
   onDelete,
+  onDeleteTable,
   onSelect,
 }: {
   schema: UserSchema;
@@ -118,6 +119,7 @@ function SchemaTreeNode({
   onToggleSchema: (id: number) => void;
   onToggleTable: (key: string) => void;
   onDelete: (id: number) => void;
+  onDeleteTable: (schemaId: number, tableName: string) => void;
   onSelect?: (selection: SchemaSelection | null) => void;
 }) {
   const tables = normalizeTables(schema.tables);
@@ -173,12 +175,15 @@ function SchemaTreeNode({
 
         return (
           <div key={ti} className="ml-3">
-            <button
+            <div
+              role="button"
+              tabIndex={0}
               onClick={() => {
                 onToggleTable(tableKey);
                 onSelect?.({ schemaId: schema.id, tableName: table.name });
               }}
-              className={`w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-left hover:bg-accent/50 ${
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { onToggleTable(tableKey); onSelect?.({ schemaId: schema.id, tableName: table.name }); } }}
+              className={`w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-left hover:bg-accent/50 group/table cursor-pointer ${
                 isTableSelected ? "bg-primary/10 ring-1 ring-primary/30" : ""
               }`}
             >
@@ -197,7 +202,14 @@ function SchemaTreeNode({
                 size="sm"
               />
               <span className="text-[9px] text-muted-foreground/50 ml-auto">{table.columns.length}</span>
-            </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onDeleteTable(schema.id, table.name); }}
+                className="p-0.5 rounded opacity-0 group-hover/table:opacity-100 hover:bg-destructive/20 transition-all"
+                title={`Delete table ${table.name}`}
+              >
+                <Trash2 className="w-2.5 h-2.5 text-destructive" />
+              </button>
+            </div>
 
             {/* Columns under this table */}
             {isTableExpanded && (
@@ -267,6 +279,7 @@ export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
   const { data: schemas, isLoading } = useUserSchemas();
   const deleteMutation = useDeleteUserSchema();
   const createMutation = useCreateUserSchema();
+  const updateMutation = useUpdateUserSchema();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [expandedSchemas, setExpandedSchemas] = useState<Set<number>>(new Set());
@@ -294,6 +307,26 @@ export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
     deleteMutation.mutate(id, {
       onSuccess: () => toast({ title: "Schema removed" }),
     });
+  };
+
+  const handleDeleteTable = (schemaId: number, tableName: string) => {
+    const schema = schemas?.find((s) => s.id === schemaId);
+    if (!schema) return;
+    const tables = normalizeTables(schema.tables);
+    const filtered = tables.filter((t) => t.name !== tableName);
+    updateMutation.mutate(
+      { id: schemaId, data: { tables: filtered } },
+      {
+        onSuccess: () => {
+          toast({ title: "Table deleted", description: `"${tableName}" removed from ${schema.name}.` });
+          // Clear selection if the deleted table was selected
+          if (selection?.schemaId === schemaId && selection?.tableName === tableName) {
+            onSelect?.({ schemaId });
+          }
+        },
+        onError: () => toast({ title: "Failed to delete table", variant: "destructive" }),
+      }
+    );
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -371,6 +404,7 @@ export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
                 onToggleSchema={toggleSchema}
                 onToggleTable={toggleTable}
                 onDelete={handleDelete}
+                onDeleteTable={handleDeleteTable}
                 onSelect={onSelect}
               />
             ))
