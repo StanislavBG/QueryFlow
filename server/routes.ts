@@ -9,6 +9,8 @@ import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommenda
 import { requireAdmin, resolveAppUser, logActivity } from "./auth";
 import { mergeWaterfallAnalysis } from "./waterfall-merge";
 import type { WaterfallAnalysis } from "@shared/waterfall";
+import Stripe from "stripe";
+import { createCheckoutSessionSchema } from "@shared/schema";
 
 // All available analysis categories
 const ALL_CATEGORIES = ["structure", "optimization", "error", "style", "formatting", "documentation"] as const;
@@ -1647,6 +1649,124 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
       console.error("Demo seed failed:", err);
       res.status(500).json({ message: "Failed to generate demo versions." });
     }
+  });
+
+  // ─── Stripe Payments ───────────────────────────────────────────────
+
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY_PROD;
+  const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  const stripe = stripeSecretKey ? new Stripe(stripeSecretKey) : null;
+
+  // GET /api/stripe/config — return available products/prices
+  app.get("/api/stripe/config", async (req, res) => {
+    const { userId } = getAuth(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!stripe) return res.status(503).json({ message: "Stripe not configured" });
+
+    try {
+      const prices = await stripe.prices.list({ active: true, expand: ["data.product"] });
+      const products = prices.data
+        .filter((p) => p.product && typeof p.product !== "string" && (p.product as Stripe.Product).active)
+        .map((p) => {
+          const product = p.product as Stripe.Product;
+          return {
+            productId: product.id,
+            priceId: p.id,
+            name: product.name,
+            description: product.description,
+            amount: p.unit_amount,
+            currency: p.currency,
+            interval: p.recurring?.interval || null,
+          };
+        });
+      res.json({ products });
+    } catch (err) {
+      console.error("Stripe config error:", err);
+      res.status(500).json({ message: "Failed to fetch Stripe products" });
+    }
+  });
+
+  // POST /api/stripe/create-checkout-session — create Stripe Checkout session
+  app.post("/api/stripe/create-checkout-session", async (req, res) => {
+    const { userId } = getAuth(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!stripe) return res.status(503).json({ message: "Stripe not configured" });
+
+    try {
+      const { priceId } = createCheckoutSessionSchema.parse(req.body);
+
+      // Look up the price to get product info
+      const price = await stripe.prices.retrieve(priceId, { expand: ["product"] });
+
+      const origin = `${req.protocol}://${req.get("host")}`;
+      const session = await stripe.checkout.sessions.create({
+        mode: price.recurring ? "subscription" : "payment",
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${origin}/?stripe=success`,
+        cancel_url: `${origin}/?stripe=canceled`,
+        client_reference_id: userId,
+      });
+
+      // Insert pending payment record
+      await storage.createPayment({
+        userId,
+        stripeSessionId: session.id,
+        productId: typeof price.product === "string" ? price.product : (price.product as Stripe.Product).id,
+        priceId,
+        status: "pending",
+      });
+
+      res.json({ sessionUrl: session.url });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error("Checkout session error:", err);
+      res.status(500).json({ message: "Failed to create checkout session" });
+    }
+  });
+
+  // POST /api/stripe/webhook — Stripe webhook handler
+  app.post("/api/stripe/webhook", async (req, res) => {
+    if (!stripe || !stripeWebhookSecret) {
+      return res.status(503).json({ message: "Stripe not configured" });
+    }
+
+    const sig = req.headers["stripe-signature"] as string;
+    let event: Stripe.Event;
+
+    try {
+      event = stripe.webhooks.constructEvent(req.rawBody as Buffer, sig, stripeWebhookSecret);
+    } catch (err: any) {
+      console.error("Webhook signature verification failed:", err.message);
+      return res.status(400).json({ message: `Webhook Error: ${err.message}` });
+    }
+
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as Stripe.Checkout.Session;
+      await storage.updatePaymentBySessionId(session.id, {
+        status: "completed",
+        stripeCustomerId: session.customer as string ?? undefined,
+        stripePaymentIntentId: (session.payment_intent as string) ?? undefined,
+        amount: session.amount_total ?? undefined,
+        currency: session.currency ?? undefined,
+      });
+    } else if (event.type === "checkout.session.expired") {
+      const session = event.data.object as Stripe.Checkout.Session;
+      await storage.updatePaymentBySessionId(session.id, { status: "failed" });
+    }
+
+    res.json({ received: true });
+  });
+
+  // GET /api/stripe/payments — user's payment history
+  app.get("/api/stripe/payments", async (req, res) => {
+    const { userId } = getAuth(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const userPayments = await storage.getPaymentsByUserId(userId);
+    res.json({ payments: userPayments });
   });
 
   // ─── Seed Data ─────────────────────────────────────────────────────
