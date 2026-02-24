@@ -21,6 +21,7 @@ import {
   Copy,
   Check,
   Info,
+  ClipboardPaste,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { VoiceContextButton } from "@/components/VoiceContextButton";
@@ -395,8 +396,19 @@ export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
           size="sm"
           variant="ghost"
           className="h-6 w-6 p-0"
+          onClick={handlePaste}
+          disabled={createMutation.isPending}
+          title="Paste schema from clipboard"
+        >
+          <ClipboardPaste className="w-3 h-3" />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 w-6 p-0"
           onClick={() => fileInputRef.current?.click()}
           disabled={createMutation.isPending}
+          title="Upload schema file"
         >
           {createMutation.isPending ? (
             <Loader2 className="w-3 h-3 animate-spin" />
