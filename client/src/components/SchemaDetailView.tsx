@@ -1,9 +1,10 @@
-import { useMemo, useState, useCallback, useEffect } from "react";
-import { useUserSchemas, useSchemaVoiceContexts, useUpdateUserSchema } from "@/hooks/use-sql-queries";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { useUserSchemas, useSchemaVoiceContexts, useUpdateUserSchema, useAddTablesToSchema } from "@/hooks/use-sql-queries";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Table2, Database, Key, Columns3, ChevronLeft, ArrowRight, Plus, Check, X, Pencil } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Table2, Database, Key, Columns3, ChevronLeft, ArrowRight, Plus, Check, X, Pencil, Trash2, Upload, FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { VoiceContextButton } from "@/components/VoiceContextButton";
@@ -74,7 +75,12 @@ function SchemaOverview({
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState(schema.name);
   const updateMutation = useUpdateUserSchema();
+  const addTablesMutation = useAddTablesToSchema();
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showAddTable, setShowAddTable] = useState(false);
+  const [pasteContent, setPasteContent] = useState("");
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Sync edit state when schema.name changes externally
   useEffect(() => { setEditName(schema.name); }, [schema.name]);
@@ -100,21 +106,62 @@ function SchemaOverview({
     );
   }, [editName, schema.id, schema.name, updateMutation, toast]);
 
-  const handleAddTable = useCallback(() => {
-    const name = uniqueName("new_table_", tables.map((t) => t.name));
-    const newTable: ParsedTable = {
-      name,
-      columns: [{ name: "id", type: "INT", isPrimaryKey: true }],
-      relationships: [],
-    };
+  const handleDeleteTable = useCallback((tableName: string) => {
+    const filtered = tables.filter((t) => t.name !== tableName);
     updateMutation.mutate(
-      { id: schema.id, data: { tables: [...tables, newTable] } },
+      { id: schema.id, data: { tables: filtered } },
       {
-        onSuccess: () => toast({ title: "Table added" }),
-        onError: () => toast({ title: "Failed to add table", variant: "destructive" }),
+        onSuccess: () => toast({ title: "Table deleted", description: `"${tableName}" removed.` }),
+        onError: () => toast({ title: "Failed to delete table", variant: "destructive" }),
       }
     );
   }, [schema.id, tables, updateMutation, toast]);
+
+  const handleAddTablesFromContent = useCallback((rawContent: string, fileName?: string) => {
+    if (!rawContent.trim()) return;
+    addTablesMutation.mutate(
+      { schemaId: schema.id, rawContent, fileName },
+      {
+        onSuccess: (result) => {
+          const addedCount = result.added.length;
+          const skippedCount = result.duplicatesSkipped.length;
+          let desc = `${addedCount} table${addedCount !== 1 ? "s" : ""} added.`;
+          if (skippedCount > 0) {
+            desc += ` ${skippedCount} duplicate${skippedCount !== 1 ? "s" : ""} skipped.`;
+          }
+          toast({ title: "Tables added", description: desc });
+          setShowAddTable(false);
+          setPasteContent("");
+        },
+        onError: (err) => toast({ title: "Failed to add tables", description: err.message, variant: "destructive" }),
+      }
+    );
+  }, [schema.id, addTablesMutation, toast]);
+
+  const handleFileDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      const file = files[0];
+      file.text().then((content) => {
+        handleAddTablesFromContent(content, file.name);
+      });
+    }
+  }, [handleAddTablesFromContent]);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      file.text().then((content) => {
+        handleAddTablesFromContent(content, file.name);
+      });
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [handleAddTablesFromContent]);
+
+  const isAddingTables = addTablesMutation.isPending;
 
   return (
     <div className="p-6 space-y-6">
@@ -188,21 +235,36 @@ function SchemaOverview({
       )}
 
       {/* Table cards grid */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${Math.min(Math.ceil(Math.sqrt(tables.length)), 3)}, minmax(200px, 1fr))` }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${Math.min(Math.ceil(Math.sqrt(Math.max(tables.length, 1))), 3)}, minmax(200px, 1fr))` }}>
         {tables.map((table) => {
           const sorted = sortColumns(table.columns);
           return (
-            <button
+            <div
               key={table.name}
-              onClick={() => onNavigate?.({ schemaId: schema.id, tableName: table.name })}
-              className="rounded-lg border border-border bg-card shadow-sm overflow-hidden text-left hover:border-primary/50 hover:shadow-md transition-all"
+              className="rounded-lg border border-border bg-card shadow-sm overflow-hidden text-left hover:border-primary/50 hover:shadow-md transition-all group/card"
             >
               <div className="px-3 py-2 bg-primary/10 border-b border-border flex items-center gap-2">
                 <Table2 className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                <span className="text-xs font-semibold text-foreground truncate">{table.name}</span>
-                <Badge variant="secondary" className="text-[9px] h-4 ml-auto">{table.columns.length} cols</Badge>
+                <button
+                  onClick={() => onNavigate?.({ schemaId: schema.id, tableName: table.name })}
+                  className="text-xs font-semibold text-foreground truncate flex-1 text-left hover:text-primary transition-colors"
+                >
+                  {table.name}
+                </button>
+                <Badge variant="secondary" className="text-[9px] h-4">{table.columns.length} cols</Badge>
+                <button
+                  onClick={() => handleDeleteTable(table.name)}
+                  disabled={updateMutation.isPending}
+                  className="p-0.5 rounded opacity-0 group-hover/card:opacity-100 hover:bg-destructive/20 transition-all disabled:opacity-50"
+                  title={`Delete table ${table.name}`}
+                >
+                  <Trash2 className="w-3 h-3 text-destructive" />
+                </button>
               </div>
-              <div className="p-2">
+              <button
+                onClick={() => onNavigate?.({ schemaId: schema.id, tableName: table.name })}
+                className="w-full p-2 text-left"
+              >
                 {sorted.slice(0, 5).map((col) => (
                   <div key={col.name} className="flex items-center gap-1.5 text-[10px] py-[1px]">
                     {col.isPrimaryKey ? (
@@ -219,20 +281,126 @@ function SchemaOverview({
                 {table.columns.length > 5 && (
                   <p className="text-[9px] text-muted-foreground/50 mt-1">+{table.columns.length - 5} more...</p>
                 )}
-              </div>
-            </button>
+              </button>
+            </div>
           );
         })}
 
-        {/* Add table button */}
-        <button
-          onClick={handleAddTable}
-          disabled={updateMutation.isPending}
-          className="rounded-lg border-2 border-dashed border-border bg-card/50 shadow-sm overflow-hidden text-left hover:border-primary/50 hover:shadow-md transition-all flex flex-col items-center justify-center gap-2 py-8 min-h-[100px] disabled:opacity-50"
-        >
-          <Plus className="w-5 h-5 text-muted-foreground/50" />
-          <span className="text-xs text-muted-foreground/50">Add Table</span>
-        </button>
+        {/* Smart Add Table widget */}
+        {!showAddTable ? (
+          <button
+            onClick={() => setShowAddTable(true)}
+            disabled={isAddingTables}
+            className="rounded-lg border-2 border-dashed border-border bg-card/50 shadow-sm overflow-hidden text-left hover:border-primary/50 hover:shadow-md transition-all flex flex-col items-center justify-center gap-2 py-8 min-h-[100px] disabled:opacity-50"
+          >
+            {isAddingTables ? (
+              <>
+                <Loader2 className="w-5 h-5 text-primary animate-spin" />
+                <span className="text-xs text-muted-foreground">Parsing tables...</span>
+              </>
+            ) : (
+              <>
+                <Plus className="w-5 h-5 text-muted-foreground/50" />
+                <span className="text-xs text-muted-foreground/50">Add Table</span>
+              </>
+            )}
+          </button>
+        ) : (
+          <div className="rounded-lg border-2 border-dashed border-primary/30 bg-card shadow-sm overflow-hidden min-h-[100px] col-span-full">
+            <div className="px-3 py-2 bg-primary/5 border-b border-border flex items-center gap-2">
+              <Plus className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+              <span className="text-xs font-semibold text-foreground flex-1">Add Tables</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 w-5 p-0"
+                aria-label="Close"
+                onClick={() => { setShowAddTable(false); setPasteContent(""); }}
+              >
+                <X className="w-3 h-3 text-muted-foreground" />
+              </Button>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-[11px] text-muted-foreground">
+                Paste DDL, DESCRIBE output, or any table definition text. You can also drop a file.
+              </p>
+
+              {/* Drop zone */}
+              <div
+                onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                onDragLeave={() => setIsDragOver(false)}
+                onDrop={handleFileDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
+                  isDragOver
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/50"
+                }`}
+              >
+                <Upload className="w-5 h-5 mx-auto mb-1.5 text-muted-foreground/50" />
+                <p className="text-[11px] text-muted-foreground">Drop a file or click to upload</p>
+                <p className="text-[10px] text-muted-foreground/50 mt-0.5">SQL DDL, CSV, JSON, or text</p>
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".sql,.txt,.csv,.json,.ddl,.tsv"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+
+              {/* Paste area */}
+              <Textarea
+                value={pasteContent}
+                onChange={(e) => setPasteContent(e.target.value)}
+                placeholder="Paste table definitions here (CREATE TABLE, DESCRIBE output, etc.)"
+                className="text-xs min-h-[80px] max-h-[200px] font-mono"
+              />
+
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="h-7 text-xs"
+                  disabled={!pasteContent.trim() || isAddingTables}
+                  onClick={() => handleAddTablesFromContent(pasteContent)}
+                >
+                  {isAddingTables ? (
+                    <>
+                      <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                      Parsing...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-3 h-3 mr-1.5" />
+                      Parse & Add Tables
+                    </>
+                  )}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={isAddingTables}
+                  onClick={() => {
+                    navigator.clipboard.readText().then((text) => {
+                      if (text.trim()) {
+                        setPasteContent(text);
+                      } else {
+                        toast({ title: "Clipboard empty", variant: "destructive" });
+                      }
+                    }).catch(() => {
+                      toast({ title: "Clipboard access denied", description: "Allow clipboard access to paste.", variant: "destructive" });
+                    });
+                  }}
+                >
+                  <FileText className="w-3 h-3 mr-1.5" />
+                  Paste from clipboard
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
