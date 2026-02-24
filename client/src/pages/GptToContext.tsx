@@ -18,18 +18,28 @@ import {
   Target,
   ArrowLeft,
   Copy,
-  Plus,
   Trash2,
   BookOpen,
   Sparkles,
   StickyNote,
   Search,
+  CheckCircle2,
+  XCircle,
+  Wrench,
 } from "lucide-react";
 import { useLocation } from "wouter";
 
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  actions?: AgentActionResult[];
+}
+
+interface AgentActionResult {
+  tool: string;
+  success: boolean;
+  message: string;
+  data?: unknown;
 }
 
 export default function GptToContext() {
@@ -78,7 +88,17 @@ export default function GptToContext() {
         notes,
       });
       const data = await res.json();
-      setChatHistory((prev) => [...prev, { role: "assistant", content: data.answer }]);
+      const actions: AgentActionResult[] = data.actions || [];
+      setChatHistory((prev) => [...prev, { role: "assistant", content: data.answer, actions }]);
+
+      // Show toast for each executed action
+      for (const action of actions) {
+        toast({
+          title: action.success ? `Action: ${action.tool}` : `Failed: ${action.tool}`,
+          description: action.message,
+          variant: action.success ? "default" : "destructive",
+        });
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Chat request failed";
       toast({ title: "Error", description: errMsg, variant: "destructive" });
@@ -258,6 +278,30 @@ export default function GptToContext() {
                       }`}
                     >
                       <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                      {/* Agent action results */}
+                      {msg.actions && msg.actions.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-border/50 space-y-1">
+                          {msg.actions.map((action, ai) => (
+                            <div
+                              key={ai}
+                              className={`flex items-center gap-1.5 text-xs rounded px-2 py-1 ${
+                                action.success
+                                  ? "bg-green-500/10 text-green-700 dark:text-green-400"
+                                  : "bg-red-500/10 text-red-700 dark:text-red-400"
+                              }`}
+                            >
+                              {action.success ? (
+                                <CheckCircle2 className="w-3 h-3 shrink-0" />
+                              ) : (
+                                <XCircle className="w-3 h-3 shrink-0" />
+                              )}
+                              <Wrench className="w-3 h-3 shrink-0 opacity-60" />
+                              <span className="font-medium">{action.tool}</span>
+                              <span className="opacity-75">— {action.message}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     {msg.role === "assistant" && (
                       <div className="flex items-center gap-1 ml-1">

@@ -6,7 +6,7 @@ import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
 import { formatSQL } from "./formatter";
 import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, DEMO_SCENARIO_COUNT, getDemoScenarioName, llmGenerateQueryFromVoice, llmAnalyzeWaterfall, llmApplyAimFramework, llmResearchChat, llmResearchSummary, logLlmError, getLlmErrors, clearLlmErrors } from "./llm";
-import type { ResearchChatMessage } from "./llm";
+import type { ResearchChatMessage, AgentActionResult } from "./llm";
 import { requireAdmin, resolveAppUser, logActivity } from "./auth";
 import { mergeWaterfallAnalysis } from "./waterfall-merge";
 import type { WaterfallAnalysis } from "@shared/waterfall";
@@ -1547,6 +1547,9 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
   });
 
   // ─── GPT to Context — Research Chat ────────────────────────────────
+  // The LLM can invoke site CRUD tools (create_schema, add_voice_context,
+  // etc.). The endpoint executes them server-side and returns both the
+  // text answer and a list of action results.
 
   app.post("/api/research/chat", async (req, res) => {
     try {
@@ -1570,14 +1573,190 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
       const { userId } = getAuth(req);
       logActivity(userId, "research.chat", "research");
 
-      const answer = await llmResearchChat(input.message, {
+      // Pass existing schemas so the LLM knows what's already there
+      const schemas = await storage.getUserSchemas(userId || undefined);
+      const existingSchemas = schemas.map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description || undefined,
+      }));
+
+      const result = await llmResearchChat(input.message, {
         whatToResearch: input.whatToResearch,
         whatIsObjective: input.whatIsObjective,
         chatHistory: input.chatHistory as ResearchChatMessage[],
         notes: input.notes,
+        existingSchemas,
       });
 
-      res.json({ answer });
+      // Execute any pending agent actions
+      const executedActions: AgentActionResult[] = [];
+      for (const action of result.actions) {
+        const args = action.data as Record<string, unknown>;
+        try {
+          switch (action.tool) {
+            case "create_schema": {
+              const rawContent = String(args.rawContent || "");
+              const name = String(args.name || "Uploaded Schema");
+              const description = args.description ? String(args.description) : "";
+
+              // LLM-parse the raw content
+              let parsedDdl = rawContent;
+              let tables: import("@shared/schema").ParsedTable[] = [];
+              try {
+                const parseResult = await llmParseSchema(rawContent, "agent-upload.sql");
+                parsedDdl = parseResult.parsed;
+                tables = parseResult.tables;
+              } catch (parseErr) {
+                console.warn("[research-chat] Schema parse failed:", parseErr);
+              }
+
+              const schema = await storage.createUserSchema({
+                name,
+                rawContent,
+                parsedDdl,
+                tables,
+                fileName: null,
+                userId: userId || null,
+                description,
+              });
+
+              executedActions.push({
+                tool: "create_schema",
+                success: true,
+                message: `Created schema "${name}" with ${tables.length} tables (ID: ${schema.id})`,
+                data: { schemaId: schema.id, name, tableCount: tables.length },
+              });
+              logActivity(userId, "schema.upload", "schema", schema.id);
+              break;
+            }
+
+            case "update_schema": {
+              const schemaId = Number(args.schemaId);
+              const updateData: Record<string, unknown> = {};
+              if (args.name) updateData.name = String(args.name);
+              if (args.description) updateData.description = String(args.description);
+
+              if (args.rawContent) {
+                updateData.rawContent = String(args.rawContent);
+                // Re-parse
+                try {
+                  const parseResult = await llmParseSchema(String(args.rawContent), "agent-update.sql");
+                  updateData.parsedDdl = parseResult.parsed;
+                  updateData.tables = parseResult.tables;
+                } catch (parseErr) {
+                  console.warn("[research-chat] Schema re-parse failed:", parseErr);
+                }
+              }
+
+              const updated = await storage.updateUserSchema(schemaId, updateData);
+              if (updated) {
+                executedActions.push({
+                  tool: "update_schema",
+                  success: true,
+                  message: `Updated schema "${updated.name}" (ID: ${schemaId})`,
+                  data: { schemaId },
+                });
+              } else {
+                executedActions.push({
+                  tool: "update_schema",
+                  success: false,
+                  message: `Schema ID ${schemaId} not found`,
+                });
+              }
+              break;
+            }
+
+            case "list_schemas": {
+              const list = await storage.getUserSchemas(userId || undefined);
+              executedActions.push({
+                tool: "list_schemas",
+                success: true,
+                message: `Found ${list.length} schemas`,
+                data: list.map((s) => ({ id: s.id, name: s.name, description: s.description })),
+              });
+              break;
+            }
+
+            case "add_voice_context": {
+              const schemaId = Number(args.schemaId);
+              const targetType = String(args.targetType) as "schema" | "table" | "column";
+              const transcript = String(args.transcript);
+              const targetTable = args.targetTable ? String(args.targetTable) : null;
+              const targetColumn = args.targetColumn ? String(args.targetColumn) : null;
+
+              const vc = await storage.upsertSchemaVoiceContext({
+                schemaId,
+                userId: userId || null,
+                targetType,
+                targetTable,
+                targetColumn,
+                transcript,
+              });
+
+              executedActions.push({
+                tool: "add_voice_context",
+                success: true,
+                message: `Added context annotation to ${targetType}${targetTable ? ` "${targetTable}"` : ""}${targetColumn ? `.${targetColumn}` : ""} on schema ${schemaId}`,
+                data: { id: vc.id, schemaId },
+              });
+              logActivity(userId, "voice_context.upsert", "schema", schemaId);
+              break;
+            }
+
+            case "create_document": {
+              const content = String(args.content || "");
+              const contentType = String(args.contentType || "text");
+              const doc = await storage.createDocument({ content, contentType });
+              executedActions.push({
+                tool: "create_document",
+                success: true,
+                message: `Created reference document (ID: ${doc.id}, type: ${contentType})`,
+                data: { docId: doc.id },
+              });
+              break;
+            }
+
+            case "create_query": {
+              const title = String(args.title || "Untitled Query");
+              const content = String(args.content || "");
+              const query = await storage.createSqlQuery({
+                title,
+                content,
+                userId: userId || null,
+              });
+              executedActions.push({
+                tool: "create_query",
+                success: true,
+                message: `Created query "${title}" (ID: ${query.id})`,
+                data: { queryId: query.id, title },
+              });
+              logActivity(userId, "query.create", "query", query.id);
+              break;
+            }
+
+            default:
+              executedActions.push({
+                tool: action.tool,
+                success: false,
+                message: `Unknown action: ${action.tool}`,
+              });
+          }
+        } catch (actionErr) {
+          const msg = actionErr instanceof Error ? actionErr.message : String(actionErr);
+          console.error(`[research-chat] Action ${action.tool} failed:`, msg);
+          executedActions.push({
+            tool: action.tool,
+            success: false,
+            message: `Failed: ${msg}`,
+          });
+        }
+      }
+
+      res.json({
+        answer: result.answer,
+        actions: executedActions,
+      });
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
