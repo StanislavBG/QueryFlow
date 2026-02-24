@@ -400,7 +400,8 @@ export function useUpdateAgentSettings() {
 // ─── Ask (LLM Q&A) ──────────────────────────────────────────────────
 
 export function useAskQuestion() {
-  return useMutation<{ answer: string }, Error, { question: string; queryContent?: string; dialect?: string }>({
+  const queryClient = useQueryClient();
+  return useMutation<{ answer: string; contextUpdated?: boolean }, Error, { question: string; queryContent?: string; dialect?: string }>({
     mutationFn: async (data) => {
       const res = await fetch("/api/ask", {
         method: "POST",
@@ -412,6 +413,12 @@ export function useAskQuestion() {
         throw new Error(err.message);
       }
       return res.json();
+    },
+    onSuccess: (result) => {
+      // If Sage updated schema context, invalidate schema cache so UI refreshes
+      if (result.contextUpdated) {
+        queryClient.invalidateQueries({ queryKey: ["schemas"] });
+      }
     },
   });
 }

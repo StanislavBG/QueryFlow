@@ -482,39 +482,175 @@ Return ONLY the JSON array.`,
 /**
  * Answer a user question about their SQL query, schemas, or general SQL topics.
  */
+/** Tool definitions for Sage to update schema context via internal APIs. */
+const SAGE_TOOLS: Array<{
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}> = [
+  {
+    type: "function",
+    function: {
+      name: "update_schema_context",
+      description:
+        "Update context metadata on schema tables and/or columns. Use this when the user provides table or column definitions, descriptions, or business context that should be saved as metadata on matching tables/columns in their schema. The context is stored directly on the parsed schema objects.",
+      parameters: {
+        type: "object",
+        properties: {
+          updates: {
+            type: "array",
+            description: "List of context updates to apply",
+            items: {
+              type: "object",
+              properties: {
+                tableName: {
+                  type: "string",
+                  description: "Name of the table to update context for",
+                },
+                tableContext: {
+                  type: "string",
+                  description:
+                    "Business context/description for the table itself. Only set if the user provides table-level context.",
+                },
+                columnContexts: {
+                  type: "array",
+                  description:
+                    "Column-level context updates. Only include columns the user actually described.",
+                  items: {
+                    type: "object",
+                    properties: {
+                      columnName: {
+                        type: "string",
+                        description: "Name of the column",
+                      },
+                      context: {
+                        type: "string",
+                        description:
+                          "Business context/description for this column, preserved verbatim from the user's input",
+                      },
+                    },
+                    required: ["columnName", "context"],
+                  },
+                },
+              },
+              required: ["tableName"],
+            },
+          },
+        },
+        required: ["updates"],
+      },
+    },
+  },
+];
+
+export interface SchemaContextUpdate {
+  tableName: string;
+  tableContext?: string;
+  columnContexts?: Array<{ columnName: string; context: string }>;
+}
+
 export async function llmAskQuestion(
   question: string,
   queryContext?: string,
   schemas?: string,
   dialect?: string
-): Promise<string> {
+): Promise<{ answer: string; contextUpdates?: SchemaContextUpdate[] }> {
   const openai = getClient();
 
-  const parts: string[] = [];
-  parts.push("You are a helpful, non-judgmental SQL advisor. Answer the analyst's question clearly and concisely.");
+  const systemParts: string[] = [];
+  systemParts.push(
+    "You are a helpful, non-judgmental SQL advisor called Sage. Answer the analyst's question clearly and concisely."
+  );
+  systemParts.push(
+    "\nYou have access to tools that let you update schema context (metadata descriptions) on the user's tables and columns. " +
+    "When the user provides table definitions, column descriptions, or business context that should be saved as metadata, " +
+    "use the update_schema_context tool to persist it. Preserve the user's wording verbatim — do not paraphrase."
+  );
 
   if (dialect) {
-    parts.push(`Detected SQL dialect: ${dialect}`);
+    systemParts.push(`\nDetected SQL dialect: ${dialect}`);
   }
-
   if (queryContext) {
-    parts.push(`\nCurrent SQL query:\n\`\`\`sql\n${queryContext}\n\`\`\``);
+    systemParts.push(`\nCurrent SQL query:\n\`\`\`sql\n${queryContext}\n\`\`\``);
   }
-
   if (schemas) {
-    parts.push(`\nAvailable schema definitions:\n${schemas}`);
+    systemParts.push(`\nAvailable schema definitions (including any existing context annotations):\n${schemas}`);
   }
 
-  parts.push(`\nQuestion: ${question}`);
-  parts.push("\nProvide a clear, helpful answer. Use markdown formatting. If suggesting SQL changes, show the code.");
+  const messages: Array<{ role: "system" | "user" | "assistant" | "tool"; content: string; tool_call_id?: string }> = [
+    { role: "system", content: systemParts.join("\n") },
+    { role: "user", content: question },
+  ];
 
+  // First LLM call — may return tool calls
   const response = await openai.chat.completions.create({
     model: MODEL,
     max_tokens: 4096,
-    messages: [{ role: "user", content: parts.join("\n") }],
+    messages: messages as any,
+    tools: SAGE_TOOLS,
+    tool_choice: "auto",
   });
 
-  return extractText(response) || "Unable to process the question.";
+  const choice = response.choices[0];
+  const toolCalls = choice.message?.tool_calls;
+
+  // If no tool calls, return plain answer
+  if (!toolCalls || toolCalls.length === 0) {
+    return { answer: extractText(response) || "Unable to process the question." };
+  }
+
+  // Process tool calls
+  let contextUpdates: SchemaContextUpdate[] | undefined;
+  const toolMessages: Array<{ role: "tool"; content: string; tool_call_id: string }> = [];
+
+  for (const tc of toolCalls) {
+    const fn = (tc as any).function;
+    if (fn?.name === "update_schema_context") {
+      try {
+        const args = JSON.parse(fn.arguments);
+        contextUpdates = args.updates as SchemaContextUpdate[];
+        const summary = contextUpdates
+          .map((u) => {
+            const parts: string[] = [`Table "${u.tableName}"`];
+            if (u.tableContext) parts.push("table context updated");
+            if (u.columnContexts?.length)
+              parts.push(`${u.columnContexts.length} column context(s) updated`);
+            return parts.join(": ");
+          })
+          .join("; ");
+        toolMessages.push({
+          role: "tool",
+          content: JSON.stringify({ success: true, summary }),
+          tool_call_id: tc.id,
+        });
+      } catch (err) {
+        toolMessages.push({
+          role: "tool",
+          content: JSON.stringify({ success: false, error: "Failed to parse tool arguments" }),
+          tool_call_id: tc.id,
+        });
+      }
+    }
+  }
+
+  // Second LLM call — get final answer after tool execution
+  const followUp = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 4096,
+    messages: [
+      ...messages,
+      { role: "assistant", content: choice.message.content || "", tool_calls: toolCalls } as any,
+      ...toolMessages,
+    ] as any,
+  });
+
+  return {
+    answer: extractText(followUp) || "Context has been updated.",
+    contextUpdates,
+  };
 }
 
 /**

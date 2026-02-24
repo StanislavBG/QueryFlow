@@ -1,10 +1,10 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
-import { useUserSchemas, useSchemaVoiceContexts, useUpdateUserSchema, useAddTablesToSchema } from "@/hooks/use-sql-queries";
+import { useUserSchemas, useSchemaVoiceContexts, useUpdateUserSchema, useAddTablesToSchema, useTranscribeAudio } from "@/hooks/use-sql-queries";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Table2, Database, Key, Columns3, ChevronLeft, ArrowRight, Plus, Check, X, Pencil, Trash2, Upload, FileText, Loader2, Info } from "lucide-react";
+import { Table2, Database, Key, Columns3, ChevronLeft, ArrowRight, Plus, Check, X, Pencil, Trash2, Upload, FileText, Loader2, Info, Mic, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { VoiceContextButton } from "@/components/VoiceContextButton";
@@ -54,6 +54,83 @@ function findVoiceContext(
       c.targetType === targetType &&
       (c.targetTable ?? null) === (targetTable ?? null) &&
       (c.targetColumn ?? null) === (targetColumn ?? null),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MicRecordButton — inline mic for context editing sections
+// ---------------------------------------------------------------------------
+
+function MicRecordButton({ schemaId, onTranscript }: { schemaId: number; onTranscript: (text: string) => void }) {
+  const [recording, setRecording] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const transcribeMutation = useTranscribeAudio();
+  const { toast } = useToast();
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+      recorderRef.current = recorder;
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.start(100);
+      setRecording(true);
+    } catch {
+      toast({ title: "Microphone access denied", variant: "destructive" });
+    }
+  }, [toast]);
+
+  const stopRecording = useCallback(async () => {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state !== "recording") return;
+    const blob = await new Promise<Blob>((resolve) => {
+      recorder.onstop = () => {
+        const b = new Blob(chunksRef.current, { type: "audio/webm" });
+        recorder.stream.getTracks().forEach((t) => t.stop());
+        resolve(b);
+      };
+      recorder.stop();
+    });
+    setRecording(false);
+    if (blob.size === 0) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = (reader.result as string).split(",")[1];
+      transcribeMutation.mutate(
+        { schemaId, audio: base64 },
+        {
+          onSuccess: (data) => onTranscript(data.transcript),
+          onError: () => toast({ title: "Transcription failed", variant: "destructive" }),
+        }
+      );
+    };
+    reader.readAsDataURL(blob);
+  }, [schemaId, transcribeMutation, toast, onTranscript]);
+
+  return (
+    <>
+      {recording ? (
+        <Button size="sm" variant="destructive" className="h-6 text-[10px] gap-1" onClick={stopRecording}>
+          <Square className="w-3 h-3" />
+          Stop
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-6 text-[10px] gap-1"
+          onClick={startRecording}
+          disabled={transcribeMutation.isPending}
+        >
+          {transcribeMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Mic className="w-3 h-3" />}
+          Record
+        </Button>
+      )}
+      {recording && <span className="text-[10px] text-red-500 animate-pulse">Recording...</span>}
+      {transcribeMutation.isPending && <span className="text-[10px] text-muted-foreground">Transcribing...</span>}
+    </>
   );
 }
 
@@ -606,7 +683,7 @@ function TableDetail({
               className="text-xs min-h-[60px] max-h-[150px] border-violet-500/20 focus-visible:ring-violet-500/30"
               autoFocus
             />
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <Button size="sm" className="h-6 text-[10px] gap-1 bg-violet-600 hover:bg-violet-700" onClick={handleSaveTableContext} disabled={updateMutation.isPending}>
                 {updateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
                 Save
@@ -614,6 +691,7 @@ function TableDetail({
               <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setIsEditingTableContext(false); setEditTableContext(table.context ?? ""); }}>
                 Cancel
               </Button>
+              <MicRecordButton schemaId={schema.id} onTranscript={(text) => setEditTableContext((prev) => prev ? prev + "\n" + text : text)} />
             </div>
           </div>
         ) : (
@@ -883,7 +961,7 @@ function ColumnDetail({
               className="text-xs min-h-[60px] max-h-[150px] border-violet-500/20 focus-visible:ring-violet-500/30"
               autoFocus
             />
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <Button size="sm" className="h-6 text-[10px] gap-1 bg-violet-600 hover:bg-violet-700" onClick={handleSaveContext} disabled={updateMutation.isPending}>
                 {updateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
                 Save
@@ -891,6 +969,7 @@ function ColumnDetail({
               <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setIsEditingContext(false); setEditContext(column.context ?? ""); }}>
                 Cancel
               </Button>
+              <MicRecordButton schemaId={schema.id} onTranscript={(text) => setEditContext((prev) => prev ? prev + "\n" + text : text)} />
             </div>
           </div>
         ) : (
