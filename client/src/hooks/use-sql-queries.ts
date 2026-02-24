@@ -337,7 +337,7 @@ export function useWaterfallData(queryId: number | null | undefined) {
       if (!res.ok) return null;
       return res.json();
     },
-    enabled: !!queryId && queryId > 0,
+    enabled: !!queryId,
   });
 }
 
