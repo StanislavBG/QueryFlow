@@ -5,7 +5,8 @@ import { storage } from "./storage";
 import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
 import { formatSQL } from "./formatter";
-import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, DEMO_SCENARIO_COUNT, getDemoScenarioName, llmGenerateQueryFromVoice, llmAnalyzeWaterfall, logLlmError, getLlmErrors, clearLlmErrors } from "./llm";
+import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, DEMO_SCENARIO_COUNT, getDemoScenarioName, llmGenerateQueryFromVoice, llmAnalyzeWaterfall, llmApplyAimFramework, llmResearchChat, llmResearchSummary, logLlmError, getLlmErrors, clearLlmErrors } from "./llm";
+import type { ResearchChatMessage } from "./llm";
 import { requireAdmin, resolveAppUser, logActivity } from "./auth";
 import { mergeWaterfallAnalysis } from "./waterfall-merge";
 import type { WaterfallAnalysis } from "@shared/waterfall";
@@ -1514,6 +1515,115 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
     } catch (err) {
       console.error("Demo seed failed:", err);
       res.status(500).json({ message: "Failed to generate demo versions." });
+    }
+  });
+
+  // ─── AIM Framework (Prompt Enhancement) ──────────────────────────────
+
+  app.post("/api/prompt/aim", async (req, res) => {
+    try {
+      const input = z.object({
+        prompt: z.string().min(1, "Prompt is required"),
+      }).parse(req.body);
+
+      if (!isLLMConfigured()) {
+        return res.status(503).json({
+          message: "LLM not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY to enable prompt enhancement.",
+        });
+      }
+
+      const { userId } = getAuth(req);
+      logActivity(userId, "prompt.aim", "prompt");
+
+      const result = await llmApplyAimFramework(input.prompt);
+      res.json(result);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error("AIM framework failed:", err);
+      res.status(500).json({ message: "Failed to apply AIM framework." });
+    }
+  });
+
+  // ─── GPT to Context — Research Chat ────────────────────────────────
+
+  app.post("/api/research/chat", async (req, res) => {
+    try {
+      const input = z.object({
+        message: z.string().min(1, "Message is required"),
+        whatToResearch: z.string().default(""),
+        whatIsObjective: z.string().default(""),
+        chatHistory: z.array(z.object({
+          role: z.enum(["user", "assistant"]),
+          content: z.string(),
+        })).default([]),
+        notes: z.string().default(""),
+      }).parse(req.body);
+
+      if (!isLLMConfigured()) {
+        return res.status(503).json({
+          message: "LLM not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY to enable research chat.",
+        });
+      }
+
+      const { userId } = getAuth(req);
+      logActivity(userId, "research.chat", "research");
+
+      const answer = await llmResearchChat(input.message, {
+        whatToResearch: input.whatToResearch,
+        whatIsObjective: input.whatIsObjective,
+        chatHistory: input.chatHistory as ResearchChatMessage[],
+        notes: input.notes,
+      });
+
+      res.json({ answer });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error("Research chat failed:", err);
+      res.status(500).json({ message: "Failed to process research query." });
+    }
+  });
+
+  // ─── GPT to Context — Research Summary ─────────────────────────────
+
+  app.post("/api/research/summary", async (req, res) => {
+    try {
+      const input = z.object({
+        whatToResearch: z.string().default(""),
+        whatIsObjective: z.string().default(""),
+        chatHistory: z.array(z.object({
+          role: z.enum(["user", "assistant"]),
+          content: z.string(),
+        })).default([]),
+        notes: z.string().default(""),
+      }).parse(req.body);
+
+      if (!isLLMConfigured()) {
+        return res.status(503).json({
+          message: "LLM not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY to enable summary generation.",
+        });
+      }
+
+      const { userId } = getAuth(req);
+      logActivity(userId, "research.summary", "research");
+
+      const summary = await llmResearchSummary({
+        whatToResearch: input.whatToResearch,
+        whatIsObjective: input.whatIsObjective,
+        chatHistory: input.chatHistory as ResearchChatMessage[],
+        notes: input.notes,
+      });
+
+      res.json({ summary });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error("Research summary failed:", err);
+      res.status(500).json({ message: "Failed to generate research summary." });
     }
   });
 

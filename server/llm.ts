@@ -1291,3 +1291,189 @@ Return ONLY JSON:
     summary: typeof raw.summary === "string" ? raw.summary : "",
   };
 }
+
+// ---------------------------------------------------------------------------
+// AIM Framework — Prompt Enhancement
+// ---------------------------------------------------------------------------
+
+/**
+ * Apply the AIM (Audience, Intent, Message) framework to a user prompt.
+ * Returns the enhanced prompt with clear AIM structure.
+ */
+export async function llmApplyAimFramework(
+  prompt: string
+): Promise<{ enhanced: string; audience: string; intent: string; message: string }> {
+  const openai = getClient();
+
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 4096,
+    messages: [
+      {
+        role: "system",
+        content: `You are an expert prompt engineer. Apply the AIM (Audience, Intent, Message) framework to transform the user's prompt into a more effective, structured prompt.
+
+The AIM framework:
+- **Audience**: Who is the AI responding as? Define the role, expertise level, and perspective.
+- **Intent**: What is the desired outcome? Be specific about the goal, format, and constraints.
+- **Message**: What is the core request? Refine the original message with clarity and specificity.
+
+Return ONLY a JSON object:
+{
+  "audience": "A concise description of who the AI should be (role/expertise)",
+  "intent": "A clear statement of the desired outcome and constraints",
+  "message": "The refined, complete message/request",
+  "enhanced": "The full enhanced prompt combining all three AIM elements into a ready-to-use prompt"
+}
+
+The "enhanced" field should be a complete, ready-to-paste prompt that naturally weaves Audience, Intent, and Message together — not a template with labels, but a flowing, professional prompt.`,
+      },
+      {
+        role: "user",
+        content: prompt,
+      },
+    ],
+  });
+
+  const text = extractText(response);
+  const result = extractJsonObject(text);
+
+  if (!result) {
+    throw new Error("Failed to parse AIM framework response from LLM");
+  }
+
+  return {
+    enhanced: String(result.enhanced || ""),
+    audience: String(result.audience || ""),
+    intent: String(result.intent || ""),
+    message: String(result.message || ""),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// GPT to Context — Research Chat & Summary
+// ---------------------------------------------------------------------------
+
+export interface ResearchChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
+ * Research chat — sends user message with full context (chat history,
+ * notes, research topic, objective) and returns the assistant response.
+ */
+export async function llmResearchChat(
+  userMessage: string,
+  options: {
+    whatToResearch: string;
+    whatIsObjective: string;
+    chatHistory: ResearchChatMessage[];
+    notes: string;
+  }
+): Promise<string> {
+  const openai = getClient();
+
+  const contextParts: string[] = [];
+
+  if (options.whatToResearch) {
+    contextParts.push(`## Research Topic\n${options.whatToResearch}`);
+  }
+  if (options.whatIsObjective) {
+    contextParts.push(`## Research Objective\n${options.whatIsObjective}`);
+  }
+  if (options.notes.trim()) {
+    contextParts.push(`## User's Research Notes (built during this session)\n${options.notes}`);
+  }
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    {
+      role: "system",
+      content: `You are a focused research assistant. The user is conducting research on a specific topic with a defined objective. Help them explore, analyze, and understand the subject matter deeply.
+
+${contextParts.join("\n\n")}
+
+Guidelines:
+- Stay focused on the research topic and objective
+- Provide specific, detailed, and sourced information when possible
+- When the user asks follow-up questions, build on the prior conversation
+- Be thorough but concise — the user is building notes from your responses
+- If the user's question diverges from the research topic, gently redirect while still being helpful
+- Use markdown formatting for readability (headers, lists, bold, code blocks)`,
+    },
+  ];
+
+  // Add chat history
+  for (const msg of options.chatHistory) {
+    messages.push({ role: msg.role, content: msg.content });
+  }
+
+  // Add the current user message
+  messages.push({ role: "user", content: userMessage });
+
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 8192,
+    messages,
+  });
+
+  return extractText(response) || "Unable to process your research query.";
+}
+
+/**
+ * Research summary — given full context (chat, notes, topic, objective),
+ * generates a clean summary that captures the research findings.
+ */
+export async function llmResearchSummary(
+  options: {
+    whatToResearch: string;
+    whatIsObjective: string;
+    chatHistory: ResearchChatMessage[];
+    notes: string;
+  }
+): Promise<string> {
+  const openai = getClient();
+
+  const chatTranscript = options.chatHistory
+    .map((m) => `**${m.role === "user" ? "User" : "Researcher"}**: ${m.content}`)
+    .join("\n\n");
+
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 8192,
+    messages: [
+      {
+        role: "system",
+        content: `You are a research summarizer. Your task is to produce a clean, well-structured summary of the research findings that the user can save and use as context for future work.
+
+The summary should:
+- Be organized with clear headers and sections
+- Focus on the objective and answer it directly
+- Synthesize insights from both the chat conversation and the user's notes
+- Be self-contained — a reader should understand the findings without seeing the original chat
+- Use markdown formatting
+- End with key takeaways or action items if applicable`,
+      },
+      {
+        role: "user",
+        content: `## Research Topic
+${options.whatToResearch}
+
+## Research Objective
+${options.whatIsObjective}
+
+## User's Research Notes
+${options.notes || "(No notes captured yet)"}
+
+## Research Conversation
+${chatTranscript || "(No conversation yet)"}
+
+---
+
+Please produce a comprehensive summary of this research, focused on the objective.`,
+      },
+    ],
+  });
+
+  return extractText(response) || "Unable to generate research summary.";
+}
