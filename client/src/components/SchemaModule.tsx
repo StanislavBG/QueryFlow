@@ -275,6 +275,7 @@ export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [expandedSchemas, setExpandedSchemas] = useState<Set<number>>(new Set());
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
+  const [isDragOver, setIsDragOver] = useState(false);
 
   const toggleSchema = (id: number) => {
     setExpandedSchemas((prev) => {
@@ -320,31 +321,71 @@ export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
     );
   };
 
+  const processFile = useCallback(
+    async (file: File) => {
+      const content = await file.text();
+      const name = file.name.replace(/\.[^.]+$/, "");
+      createMutation.mutate(
+        { name, rawContent: content, fileName: file.name },
+        {
+          onSuccess: (schema) => {
+            const tables = normalizeTables(schema.tables);
+            const parseError = (schema as Record<string, unknown>).parseError as string | undefined;
+            if (tables.length > 0) {
+              toast({ title: "Schema added", description: `"${name}" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
+            } else {
+              toast({ title: "Schema added — no tables detected", description: parseError || `"${name}" was saved but no tables could be parsed.`, variant: "destructive" });
+            }
+          },
+          onError: (err) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+        }
+      );
+    },
+    [createMutation, toast]
+  );
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      const file = files[0];
-      file.text().then((content) => {
-        const name = file.name.replace(/\.[^.]+$/, "");
-        createMutation.mutate(
-          { name, rawContent: content, fileName: file.name },
-          {
-            onSuccess: (schema) => {
-              const tables = normalizeTables(schema.tables);
-              const parseError = (schema as Record<string, unknown>).parseError as string | undefined;
-              if (tables.length > 0) {
-                toast({ title: "Schema added", description: `"${name}" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
-              } else {
-                toast({ title: "Schema added — no tables detected", description: parseError || `"${name}" was saved but no tables could be parsed.`, variant: "destructive" });
-              }
-            },
-            onError: (err) => toast({ title: "Error", description: err.message, variant: "destructive" }),
-          }
-        );
-      });
+      processFile(files[0]);
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragOver(false);
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) {
+        processFile(files[0]);
+      }
+    },
+    [processFile]
+  );
+
+  const handlePaste = useCallback(() => {
+    navigator.clipboard.readText().then((text) => {
+      if (!text.trim()) return;
+      createMutation.mutate(
+        { name: "Pasted Schema", rawContent: text },
+        {
+          onSuccess: (schema) => {
+            const tables = normalizeTables(schema.tables);
+            const parseError = (schema as Record<string, unknown>).parseError as string | undefined;
+            if (tables.length > 0) {
+              toast({ title: "Schema added", description: `"Pasted Schema" — ${tables.length} table${tables.length === 1 ? "" : "s"} detected.` });
+            } else {
+              toast({ title: "Schema added — no tables detected", description: parseError || `Saved but no tables could be parsed.`, variant: "destructive" });
+            }
+          },
+          onError: (err) => toast({ title: "Paste failed", description: err.message, variant: "destructive" }),
+        }
+      );
+    }).catch(() => {
+      toast({ title: "Paste failed", description: "Allow clipboard access to paste schema.", variant: "destructive" });
+    });
+  }, [createMutation, toast]);
 
   return (
     <div className="flex flex-col h-full">
@@ -379,10 +420,50 @@ export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
               <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
             </div>
           ) : !schemas || schemas.length === 0 ? (
-            <div className="text-center py-6 px-2">
-              <Database className="w-6 h-6 mx-auto mb-1.5 text-muted-foreground/30" />
-              <p className="text-[10px] text-muted-foreground">No schemas yet</p>
-              <p className="text-[10px] text-muted-foreground/50 mt-0.5">Upload a DDL file to start</p>
+            <div className="flex flex-col gap-2.5 px-2.5 py-3">
+              {/* Drop zone */}
+              <div
+                onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                onDragLeave={() => setIsDragOver(false)}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`flex flex-col items-center gap-1.5 rounded-lg border-2 border-dashed px-3 py-5 text-center cursor-pointer transition-colors ${
+                  isDragOver
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/50"
+                }`}
+              >
+                <Upload className="w-5 h-5 text-muted-foreground/40" />
+                <p className="text-[10px] font-medium text-muted-foreground">
+                  Drop a DDL file here
+                </p>
+                <p className="text-[9px] text-muted-foreground/50">
+                  or click to browse
+                </p>
+                <p className="text-[9px] text-muted-foreground/40 mt-0.5">
+                  SQL, CSV, JSON, TXT
+                </p>
+              </div>
+
+              {/* Paste from clipboard */}
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full h-7 text-[10px]"
+                onClick={handlePaste}
+                disabled={createMutation.isPending}
+              >
+                <FileText className="w-3 h-3 mr-1.5" />
+                Paste from clipboard
+              </Button>
+
+              {/* Parsing indicator */}
+              {createMutation.isPending && (
+                <div className="flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground py-1">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Parsing schema...
+                </div>
+              )}
             </div>
           ) : (
             schemas.map((schema) => (
