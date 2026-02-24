@@ -6,8 +6,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ClerkProvider, SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
 import Editor from "@/pages/Editor";
 import AdminDashboard from "@/pages/AdminDashboard";
-import PromptApp from "@/pages/PromptApp";
-import GptToContext from "@/pages/GptToContext";
 import NotFound from "@/pages/not-found";
 import { useCurrentUser } from "@/hooks/use-admin";
 
@@ -27,8 +25,6 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Editor} />
-      <Route path="/prompt" component={PromptApp} />
-      <Route path="/research" component={GptToContext} />
       <Route path="/admin">
         <AdminGuard><AdminDashboard /></AdminGuard>
       </Route>

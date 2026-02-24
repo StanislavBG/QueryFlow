@@ -1153,7 +1153,7 @@ export default function Editor() {
   // --- left sidebar tab definitions ---
   const LEFT_TABS: Record<string, { icon: React.ElementType; label: string; tooltip: string }> = {
     queries: { icon: FileCode2, label: "Queries", tooltip: "Manage SQL queries" },
-    ask: { icon: MessageSquare, label: "Oracle", tooltip: "Oracle — your SQL knowledge advisor" },
+    ask: { icon: MessageSquare, label: "Sage", tooltip: "Sage — your SQL knowledge advisor" },
     schemas: { icon: Table2, label: "Schemas", tooltip: "Manage schema definitions" },
   };
 
@@ -1193,29 +1193,8 @@ export default function Editor() {
           )}
         </div>
 
-        {/* Right: tools + theme + auth + settings */}
+        {/* Right: theme + auth + settings */}
         <div className="flex items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" onClick={() => setLocation("/prompt")} className="h-7 px-2 text-xs gap-1">
-                <Sparkles className="w-3.5 h-3.5" /> Prompt
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p className="text-xs">Prompt Engineer — AIM Framework</p>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" onClick={() => setLocation("/research")} className="h-7 px-2 text-xs gap-1">
-                <MessageSquare className="w-3.5 h-3.5" /> Research
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p className="text-xs">GPT to Context — Research Assistant</p>
-            </TooltipContent>
-          </Tooltip>
-          <div className="h-4 w-px bg-border" />
           {isAdmin && (
             <Tooltip>
               <TooltipTrigger asChild>
