@@ -759,32 +759,57 @@ function repairTruncatedJson(text: string): Record<string, unknown> | null {
 
 import type { ParsedTable } from "@shared/schema";
 
+// ---------------------------------------------------------------------------
+// Large-file chunking helpers for schema extraction
+// ---------------------------------------------------------------------------
+
+/** Threshold above which content is split into chunks for parallel LLM processing. */
+const SCHEMA_CHUNK_THRESHOLD = 100_000; // 100k chars
+
+/** Target size per chunk — will split at the last newline before this boundary. */
+const SCHEMA_CHUNK_TARGET = 80_000; // ~80k chars per chunk
+
 /**
- * Parse raw text content into structured schema definitions.
- *
- * Single structured LLM call — the model returns the complete ERD-ready
- * data structure (tables with typed columns, primary keys, relationships,
- * and display DDL). No local parsing, regex, or DDL building.
+ * Split large content into chunks at line boundaries.
+ * Each chunk is approximately `targetSize` chars, split at the last newline
+ * before the boundary so SQL statements are not cut mid-line.
  */
-export async function llmParseSchema(
-  rawContent: string,
-  fileName: string
-): Promise<{ parsed: string; tables: ParsedTable[]; error?: string }> {
-  const openai = getClient();
+function splitIntoChunks(content: string, targetSize: number): string[] {
+  if (content.length <= targetSize) return [content];
 
-  console.log("[schema-parse] ── STAGE 1: INPUT ──");
-  console.log("[schema-parse] fileName:", fileName, "| rawContent length:", rawContent.length);
-  console.log("[schema-parse] rawContent first 300 chars:", JSON.stringify(rawContent.slice(0, 300)));
-  console.log("[schema-parse] rawContent last  200 chars:", JSON.stringify(rawContent.slice(-200)));
+  const chunks: string[] = [];
+  let start = 0;
 
-  const response = await openai.chat.completions.create({
-    model: MODEL,
-    max_tokens: 8192,
-    messages: [
-      {
-        role: "user",
-        content: `You are a schema-extraction agent. A user uploaded content from file "${fileName}". Your ONLY job: find every database table and column in this content and return a single structured JSON object.
+  while (start < content.length) {
+    let end = Math.min(start + targetSize, content.length);
 
+    // If not at the very end, find the last newline before the target boundary
+    if (end < content.length) {
+      const lastNewline = content.lastIndexOf("\n", end);
+      if (lastNewline > start) {
+        end = lastNewline + 1; // include the newline in this chunk
+      }
+    }
+
+    chunks.push(content.slice(start, end));
+    start = end;
+  }
+
+  return chunks;
+}
+
+/** Build the schema-extraction prompt for a (possibly chunked) piece of content. */
+function buildSchemaExtractionPrompt(
+  content: string,
+  fileName: string,
+  chunkNote?: string
+): string {
+  const chunkSection = chunkNote
+    ? `\nIMPORTANT: This is ${chunkNote} of a large file. Extract ONLY the tables and columns visible in this portion. Do not worry about completeness — other chunks will cover the rest of the file.\n`
+    : "";
+
+  return `You are a schema-extraction agent. A user uploaded content from file "${fileName}". Your ONLY job: find every database table and column in this content and return a single structured JSON object.
+${chunkSection}
 The content can be in ANY format — database client output (e.g. MySQL DESCRIBE, \\d output), SQL DDL, spreadsheets, CSV, JSON, documentation, free-form text with table/column descriptions, anything. Figure out what it is and extract the schema.
 
 RULES:
@@ -793,7 +818,8 @@ RULES:
 - Identify primary keys where possible (from PRI markers, PRIMARY KEY constraints, etc.)
 - Detect foreign key relationships between tables where possible (explicit FK constraints, naming conventions like *_id columns referencing other tables)
 - Generate clean CREATE TABLE DDL for display purposes
-- Ignore non-schema content (USE statements, SHOW commands, comments, etc.)
+- Ignore non-schema content (USE statements, SHOW commands, INSERT statements, data rows, comments, etc.)
+- If this portion contains NO schema definitions at all, return {"tables": [], "ddl": ""}
 - Output ONLY the JSON object below — no explanation, no markdown fences, no other text
 
 CONTEXT EXTRACTION — this is critical:
@@ -821,49 +847,201 @@ OUTPUT FORMAT — a single JSON object:
 }
 
 CONTENT:
-${rawContent}`,
+${content}`;
+}
+
+/**
+ * Send one chunk of content to the LLM for schema extraction.
+ * Returns raw parsed tables, optional DDL, and any error message.
+ */
+async function parseSchemaChunk(
+  openai: OpenAI,
+  content: string,
+  fileName: string,
+  chunkNote?: string
+): Promise<{
+  rawTables: Array<Record<string, unknown>>;
+  ddl?: string;
+  error?: string;
+}> {
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 16384,
+    messages: [
+      {
+        role: "user",
+        content: buildSchemaExtractionPrompt(content, fileName, chunkNote),
       },
     ],
   });
 
   const text = extractText(response);
+  const finishReason = response.choices[0]?.finish_reason;
 
-  console.log("[schema-parse] ── STAGE 2: LLM RAW RESPONSE ──");
-  console.log("[schema-parse] response length:", text.length);
-  console.log("[schema-parse] response first 800 chars:", text.slice(0, 800));
-  if (text.length > 800) {
-    console.log("[schema-parse] response last  400 chars:", text.slice(-400));
+  console.log(
+    `[schema-parse] chunk response: ${text.length} chars, finish_reason=${finishReason}`
+  );
+
+  // Try normal JSON extraction first
+  let result = extractJsonObject(text);
+
+  // If extraction failed and response was truncated, attempt repair
+  if (!result && finishReason === "length") {
+    console.log(
+      "[schema-parse] Response truncated (finish_reason=length) — attempting JSON repair"
+    );
+    result = repairTruncatedJson(text);
+    if (result) {
+      console.log("[schema-parse] Successfully repaired truncated JSON");
+    }
   }
 
-  console.log("[schema-parse] ── STAGE 3: JSON EXTRACTION ──");
-  const result = extractJsonObject(text);
-
   if (!result) {
-    const error = `extractJsonObject returned null — could not find valid JSON object in LLM response. Full response: ${text.slice(0, 500)}`;
+    return {
+      rawTables: [],
+      error: `Could not extract JSON from LLM response (${text.length} chars, finish_reason=${finishReason}). First 300 chars: ${text.slice(0, 300)}`,
+    };
+  }
+
+  if (!Array.isArray(result.tables)) {
+    return {
+      rawTables: [],
+      error: `LLM returned JSON but 'tables' is ${typeof result.tables}, not an array. Keys: ${Object.keys(result).join(", ")}`,
+    };
+  }
+
+  return {
+    rawTables: result.tables as Array<Record<string, unknown>>,
+    ddl: typeof result.ddl === "string" ? result.ddl : undefined,
+  };
+}
+
+/**
+ * Merge tables from multiple chunk results, deduplicating by name.
+ * When the same table appears in multiple chunks, keeps the version with more columns.
+ */
+function mergeChunkTables(
+  allRawTables: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  const tableMap = new Map<string, Record<string, unknown>>();
+
+  for (const t of allRawTables) {
+    const name = String(t.name || "").toLowerCase();
+    if (!name) continue;
+
+    const existing = tableMap.get(name);
+    if (!existing) {
+      tableMap.set(name, t);
+    } else {
+      // Keep the version with more columns (richer definition)
+      const existingCols = Array.isArray(existing.columns)
+        ? (existing.columns as unknown[]).length
+        : 0;
+      const newCols = Array.isArray(t.columns)
+        ? (t.columns as unknown[]).length
+        : 0;
+      if (newCols > existingCols) {
+        tableMap.set(name, t);
+      }
+    }
+  }
+
+  return Array.from(tableMap.values());
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse raw text content into structured schema definitions.
+ *
+ * For small files (< 100k chars): single LLM call.
+ * For large files (>= 100k chars): splits into chunks, processes each chunk
+ * in parallel via the LLM, and merges the results.
+ *
+ * All parsing is LLM-based — no local regex or heuristic parsing.
+ */
+export async function llmParseSchema(
+  rawContent: string,
+  fileName: string
+): Promise<{ parsed: string; tables: ParsedTable[]; error?: string }> {
+  const openai = getClient();
+
+  console.log("[schema-parse] ── STAGE 1: INPUT ──");
+  console.log("[schema-parse] fileName:", fileName, "| rawContent length:", rawContent.length);
+  console.log("[schema-parse] rawContent first 300 chars:", JSON.stringify(rawContent.slice(0, 300)));
+  console.log("[schema-parse] rawContent last  200 chars:", JSON.stringify(rawContent.slice(-200)));
+
+  // ── STAGE 2: LLM EXTRACTION (single-call or chunked) ──
+  console.log("[schema-parse] ── STAGE 2: LLM EXTRACTION ──");
+
+  let rawTables: Array<Record<string, unknown>> = [];
+  let extractedDdl: string | undefined;
+  const extractionErrors: string[] = [];
+
+  if (rawContent.length < SCHEMA_CHUNK_THRESHOLD) {
+    // ---- Small file: single LLM call ----
+    console.log("[schema-parse] Using single-call mode (content under", SCHEMA_CHUNK_THRESHOLD, "chars)");
+
+    const result = await parseSchemaChunk(openai, rawContent, fileName);
+    rawTables = result.rawTables;
+    extractedDdl = result.ddl;
+    if (result.error) extractionErrors.push(result.error);
+
+    console.log("[schema-parse] Single-call result:", rawTables.length, "raw tables |", extractedDdl?.length ?? 0, "chars DDL");
+  } else {
+    // ---- Large file: chunked parallel processing ----
+    const chunks = splitIntoChunks(rawContent, SCHEMA_CHUNK_TARGET);
+    console.log(
+      `[schema-parse] Using chunked mode: ${chunks.length} chunks for ${rawContent.length} char file`
+    );
+    for (let i = 0; i < chunks.length; i++) {
+      console.log(`[schema-parse]   chunk ${i + 1}/${chunks.length}: ${chunks[i].length} chars`);
+    }
+
+    const results = await Promise.all(
+      chunks.map((chunk, i) =>
+        parseSchemaChunk(
+          openai,
+          chunk,
+          fileName,
+          `chunk ${i + 1} of ${chunks.length}`
+        )
+      )
+    );
+
+    // Collect all raw tables and DDL fragments from chunks
+    const allRawTables: Array<Record<string, unknown>> = [];
+    const ddlParts: string[] = [];
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      console.log(
+        `[schema-parse]   chunk ${i + 1} result: ${r.rawTables.length} tables${r.error ? " | error: " + r.error : ""}`
+      );
+      allRawTables.push(...r.rawTables);
+      if (r.ddl) ddlParts.push(r.ddl);
+      if (r.error) extractionErrors.push(`chunk ${i + 1}: ${r.error}`);
+    }
+
+    // Merge and deduplicate tables across chunks
+    rawTables = mergeChunkTables(allRawTables);
+    extractedDdl = ddlParts.length > 0 ? ddlParts.join("\n\n") : undefined;
+
+    console.log(
+      `[schema-parse] Merged: ${rawTables.length} unique tables from ${allRawTables.length} total chunk entries`
+    );
+  }
+
+  // If extraction produced nothing at all
+  if (rawTables.length === 0 && extractionErrors.length > 0) {
+    const error = `Schema extraction failed: ${extractionErrors.join("; ")}`;
     console.error("[schema-parse] FAIL:", error);
     return { parsed: rawContent, tables: [], error };
   }
 
-  console.log("[schema-parse] extractJsonObject succeeded. Top-level keys:", Object.keys(result));
-  console.log("[schema-parse] result.tables type:", typeof result.tables, "| isArray:", Array.isArray(result.tables));
-  if (Array.isArray(result.tables)) {
-    console.log("[schema-parse] result.tables length:", (result.tables as unknown[]).length);
-    // Log first table entry in detail to see shape
-    if ((result.tables as unknown[]).length > 0) {
-      console.log("[schema-parse] result.tables[0] sample:", JSON.stringify((result.tables as unknown[])[0]).slice(0, 500));
-    }
-  } else {
-    console.error("[schema-parse] FAIL: result.tables is NOT an array! Value:", JSON.stringify(result.tables).slice(0, 300));
-    const error = `LLM returned JSON but 'tables' is ${typeof result.tables}, not an array. Keys: ${Object.keys(result).join(", ")}`;
-    return { parsed: rawContent, tables: [], error };
-  }
-
-  console.log("[schema-parse] result.ddl type:", typeof result.ddl, "| length:", typeof result.ddl === "string" ? result.ddl.length : "N/A");
-
-  console.log("[schema-parse] ── STAGE 4: TABLE VALIDATION ──");
+  // ── STAGE 3: TABLE VALIDATION ──
+  console.log("[schema-parse] ── STAGE 3: TABLE VALIDATION ──");
 
   // Log each raw table entry before filtering
-  const rawTables = result.tables as Array<Record<string, unknown>>;
   for (let i = 0; i < rawTables.length; i++) {
     const t = rawTables[i];
     const nameOk = typeof t.name === "string" && (t.name as string).length > 0;
@@ -900,7 +1078,8 @@ ${rawContent}`,
         : [],
     }));
 
-  console.log("[schema-parse] ── STAGE 5: FINAL OUTPUT ──");
+  // ── STAGE 4: FINAL OUTPUT ──
+  console.log("[schema-parse] ── STAGE 4: FINAL OUTPUT ──");
   console.log("[schema-parse] tables after validation:", tables.length, "of", rawTables.length, "raw entries");
 
   if (tables.length === 0) {
@@ -919,8 +1098,8 @@ ${rawContent}`,
     );
   }
 
-  const ddl = typeof result.ddl === "string" ? result.ddl : rawContent;
-  console.log("[schema-parse] DDL source:", typeof result.ddl === "string" ? "from LLM" : "fallback to rawContent", "| length:", ddl.length);
+  const ddl = extractedDdl || rawContent;
+  console.log("[schema-parse] DDL source:", extractedDdl ? "from LLM" : "fallback to rawContent", "| length:", ddl.length);
 
   return { parsed: ddl, tables };
 }
