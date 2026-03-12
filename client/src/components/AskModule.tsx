@@ -20,9 +20,23 @@ interface QAPair {
 interface AskModuleProps {
   queryContent: string;
   dialect: string;
+  activeSchemaIds?: Set<number>;
+  onQueryGenerated?: (sql: string) => void;
 }
 
-export function AskModule({ queryContent, dialect }: AskModuleProps) {
+/** Extract SQL code blocks from a markdown-style answer. */
+function extractSqlBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  const regex = /```(?:sql)?\s*\n([\s\S]*?)```/gi;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const sql = match[1].trim();
+    if (sql) blocks.push(sql);
+  }
+  return blocks;
+}
+
+export function AskModule({ queryContent, dialect, activeSchemaIds, onQueryGenerated }: AskModuleProps) {
   const [question, setQuestion] = useState("");
   const [localMessages, setLocalMessages] = useState<ChatMessage[]>([]);
   const [isListening, setIsListening] = useState(false);
@@ -95,14 +109,22 @@ export function AskModule({ queryContent, dialect }: AskModuleProps) {
     // Persist user message
     saveMutation.mutate({ role: "user", content: trimmed });
 
+    const schemaIds = activeSchemaIds ? Array.from(activeSchemaIds) : undefined;
     askMutation.mutate(
-      { question: trimmed, queryContent: queryContent || undefined, dialect },
+      { question: trimmed, queryContent: queryContent || undefined, dialect, activeSchemaIds: schemaIds },
       {
         onSuccess: (data) => {
           const assistantMsg: ChatMessage = { role: "assistant", content: data.answer };
           setLocalMessages(prev => [...prev, assistantMsg]);
           // Persist assistant message
           saveMutation.mutate({ role: "assistant", content: data.answer });
+          // Extract SQL blocks and send to editor
+          if (onQueryGenerated) {
+            const sqlBlocks = extractSqlBlocks(data.answer);
+            if (sqlBlocks.length > 0) {
+              onQueryGenerated(sqlBlocks.join("\n\n"));
+            }
+          }
         },
         onError: (error) => {
           const errMsg: ChatMessage = { role: "assistant", content: `Unable to process: ${error.message}` };
