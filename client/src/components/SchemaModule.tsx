@@ -115,6 +115,8 @@ function SchemaTreeNode({
   onDelete,
   onDeleteTable,
   onSelect,
+  onPasteToSchema,
+  isPasting,
 }: {
   schema: UserSchema;
   expandedSchemas: Set<number>;
@@ -125,6 +127,8 @@ function SchemaTreeNode({
   onDelete: (id: number) => void;
   onDeleteTable: (schemaId: number, tableName: string) => void;
   onSelect?: (selection: SchemaSelection | null) => void;
+  onPasteToSchema?: (schemaId: number) => void;
+  isPasting?: boolean;
 }) {
   const tables = normalizeTables(schema.tables);
   const isExpanded = expandedSchemas.has(schema.id);
@@ -160,6 +164,18 @@ function SchemaTreeNode({
           <Info className="w-2.5 h-2.5 text-violet-400/60 flex-shrink-0" />
         )}
         <span className="text-[9px] text-muted-foreground/50">{tables.length}</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onPasteToSchema?.(schema.id); }}
+          disabled={isPasting}
+          className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-primary/20 transition-all disabled:opacity-50"
+          title="Paste tables into this schema"
+        >
+          {isPasting ? (
+            <Loader2 className="w-2.5 h-2.5 text-primary animate-spin" />
+          ) : (
+            <ClipboardPaste className="w-2.5 h-2.5 text-primary" />
+          )}
+        </button>
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(schema.id); }}
           className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/20 transition-all"
@@ -272,11 +288,13 @@ export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
   const deleteMutation = useDeleteUserSchema();
   const createMutation = useCreateUserSchema();
   const updateMutation = useUpdateUserSchema();
+  const addTablesMutation = useAddTablesToSchema();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [expandedSchemas, setExpandedSchemas] = useState<Set<number>>(new Set());
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
   const [isDragOver, setIsDragOver] = useState(false);
+  const [pastingSchemaId, setPastingSchemaId] = useState<number | null>(null);
 
   const toggleSchema = (id: number) => {
     setExpandedSchemas((prev) => {
@@ -365,9 +383,12 @@ export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
     [processFile]
   );
 
-  const handlePaste = useCallback(() => {
+  const handlePasteNewSchema = useCallback(() => {
     navigator.clipboard.readText().then((text) => {
-      if (!text.trim()) return;
+      if (!text.trim()) {
+        toast({ title: "Clipboard empty", variant: "destructive" });
+        return;
+      }
       createMutation.mutate(
         { name: "Pasted Schema", rawContent: text },
         {
@@ -388,20 +409,51 @@ export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
     });
   }, [createMutation, toast]);
 
+  const handlePasteToSchema = useCallback((schemaId: number) => {
+    const schema = schemas?.find((s) => s.id === schemaId);
+    if (!schema) return;
+    setPastingSchemaId(schemaId);
+    navigator.clipboard.readText().then((text) => {
+      if (!text.trim()) {
+        setPastingSchemaId(null);
+        toast({ title: "Clipboard empty", variant: "destructive" });
+        return;
+      }
+      addTablesMutation.mutate(
+        { schemaId, rawContent: text },
+        {
+          onSuccess: (result) => {
+            setPastingSchemaId(null);
+            const addedCount = result.added.length;
+            const skippedCount = result.duplicatesSkipped.length;
+            let desc = `${addedCount} table${addedCount !== 1 ? "s" : ""} added to "${schema.name}".`;
+            if (skippedCount > 0) {
+              desc += ` ${skippedCount} duplicate${skippedCount !== 1 ? "s" : ""} skipped.`;
+            }
+            if (addedCount > 0) {
+              toast({ title: "Tables added", description: desc });
+            } else {
+              toast({ title: "No new tables", description: desc });
+            }
+            // Auto-expand the schema to show newly added tables
+            setExpandedSchemas((prev) => new Set(prev).add(schemaId));
+          },
+          onError: (err) => {
+            setPastingSchemaId(null);
+            toast({ title: "Paste failed", description: err.message, variant: "destructive" });
+          },
+        }
+      );
+    }).catch(() => {
+      setPastingSchemaId(null);
+      toast({ title: "Paste failed", description: "Allow clipboard access to paste.", variant: "destructive" });
+    });
+  }, [schemas, addTablesMutation, toast]);
+
   return (
     <div className="flex flex-col h-full">
       <div className="p-2 border-b border-border flex items-center gap-1.5">
         <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex-1">Schemas</h3>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-6 w-6 p-0"
-          onClick={handlePaste}
-          disabled={createMutation.isPending}
-          title="Paste schema from clipboard"
-        >
-          <ClipboardPaste className="w-3 h-3" />
-        </Button>
         <Button
           size="sm"
           variant="ghost"
@@ -462,7 +514,7 @@ export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
                 size="sm"
                 variant="outline"
                 className="w-full h-7 text-[10px]"
-                onClick={handlePaste}
+                onClick={handlePasteNewSchema}
                 disabled={createMutation.isPending}
               >
                 <FileText className="w-3 h-3 mr-1.5" />
@@ -490,6 +542,8 @@ export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
                 onDelete={handleDelete}
                 onDeleteTable={handleDeleteTable}
                 onSelect={onSelect}
+                onPasteToSchema={handlePasteToSchema}
+                isPasting={pastingSchemaId === schema.id}
               />
             ))
           )}
