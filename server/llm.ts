@@ -562,7 +562,15 @@ export async function llmAskQuestion(
 
   const systemParts: string[] = [];
   systemParts.push(
-    "You are a helpful, non-judgmental SQL advisor called Sage. Answer the analyst's question clearly and concisely."
+    "You are Sage, a SQL advisor embedded in a query editor. " +
+    "The analyst has activated specific database schemas below — these are the ONLY tables and columns that exist. " +
+    "Every SQL query you write MUST reference only tables and columns from these schemas. " +
+    "Never invent table names, column names, or assume structures that are not in the provided schema definitions. " +
+    "If the schema does not contain the tables needed to answer a question, say so explicitly rather than guessing."
+  );
+  systemParts.push(
+    "\nWhen you write SQL, ALWAYS wrap it in a ```sql fenced code block. " +
+    "The code block will be automatically inserted into the analyst's query editor."
   );
   systemParts.push(
     "\nYou have access to tools that let you update schema context (metadata descriptions) on the user's tables and columns. " +
@@ -571,13 +579,24 @@ export async function llmAskQuestion(
   );
 
   if (dialect) {
-    systemParts.push(`\nDetected SQL dialect: ${dialect}`);
+    systemParts.push(`\nDetected SQL dialect: ${dialect}. Write all SQL in this dialect.`);
   }
   if (queryContext) {
-    systemParts.push(`\nCurrent SQL query:\n\`\`\`sql\n${queryContext}\n\`\`\``);
+    systemParts.push(
+      `\nThe analyst's current query document (this is what they are working on right now — ` +
+      `expand or build on it when relevant rather than starting from scratch):\n\`\`\`sql\n${queryContext}\n\`\`\``
+    );
   }
   if (schemas) {
-    systemParts.push(`\nAvailable schema definitions (including any existing context annotations):\n${schemas}`);
+    systemParts.push(
+      `\nACTIVE SCHEMA DEFINITIONS — these are the only tables that exist. ` +
+      `Use ONLY these table and column names in any SQL you write:\n${schemas}`
+    );
+  } else {
+    systemParts.push(
+      "\nNo schemas are currently active. If the analyst asks for a query, " +
+      "tell them to activate a schema first so you can write correct SQL against their actual tables."
+    );
   }
 
   const messages: Array<{ role: "system" | "user" | "assistant" | "tool"; content: string; tool_call_id?: string }> = [
