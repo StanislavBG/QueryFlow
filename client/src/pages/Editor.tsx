@@ -987,6 +987,38 @@ export default function Editor() {
   // Schema drill-down selection state (for schemas tab)
   const [schemaSelection, setSchemaSelection] = useState<SchemaSelection | null>(null);
 
+  // Active schemas — schemas the Sage uses for context. All schemas active by default.
+  const [activeSchemaIds, setActiveSchemaIds] = useState<Set<number>>(new Set());
+
+  // Auto-activate newly loaded schemas so they are active by default
+  useEffect(() => {
+    if (schemas && schemas.length > 0) {
+      setActiveSchemaIds((prev) => {
+        const next = new Set(prev);
+        let changed = false;
+        for (const s of schemas) {
+          if (!next.has(s.id)) {
+            next.add(s.id);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }
+  }, [schemas]);
+
+  const handleToggleActiveSchema = useCallback((schemaId: number) => {
+    setActiveSchemaIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(schemaId)) {
+        next.delete(schemaId);
+      } else {
+        next.add(schemaId);
+      }
+      return next;
+    });
+  }, []);
+
   // Waterfall flow state (for visual sub-tab in right panel)
   const [waterfallAnalysis, setWaterfallAnalysis] = useState<import("@shared/waterfall").WaterfallAnalysis | null>(null);
   const [selectedWaterfallEdge, setSelectedWaterfallEdge] = useState<import("@shared/waterfall").WaterfallEdge | null>(null);
@@ -1039,6 +1071,14 @@ export default function Editor() {
 
   const handleContentChange = useCallback((content: string) => {
     setCurrentContent(content);
+  }, []);
+
+  // Sage callback: prepend generated SQL to the top of the current editor content
+  const handleSageQueryGenerated = useCallback((sql: string) => {
+    setCurrentContent((prev) => {
+      const separator = prev.trim() ? "\n\n" : "";
+      return sql + separator + prev;
+    });
   }, []);
 
   // Sync content when the selected query data loads
@@ -1486,6 +1526,8 @@ GROUP BY b.genre ORDER BY revenue DESC`}
                   <AskModule
                     queryContent={resolvedQueryContent}
                     dialect={detectedDialect}
+                    activeSchemaIds={activeSchemaIds}
+                    onQueryGenerated={handleSageQueryGenerated}
                   />
                 )}
                 {leftTab === "schemas" && (
@@ -1495,6 +1537,8 @@ GROUP BY b.genre ORDER BY revenue DESC`}
                       setSchemaSelection(sel);
                       if (sel) addTab("schemas");
                     }}
+                    activeSchemaIds={activeSchemaIds}
+                    onToggleActive={handleToggleActiveSchema}
                   />
                 )}
               </div>

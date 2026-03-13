@@ -22,6 +22,8 @@ import {
   Check,
   Info,
   ClipboardPaste,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { VoiceContextButton } from "@/components/VoiceContextButton";
@@ -117,6 +119,8 @@ function SchemaTreeNode({
   onSelect,
   onPasteToSchema,
   isPasting,
+  isActive,
+  onToggleActive,
 }: {
   schema: UserSchema;
   expandedSchemas: Set<number>;
@@ -129,6 +133,8 @@ function SchemaTreeNode({
   onSelect?: (selection: SchemaSelection | null) => void;
   onPasteToSchema?: (schemaId: number) => void;
   isPasting?: boolean;
+  isActive?: boolean;
+  onToggleActive?: (schemaId: number) => void;
 }) {
   const tables = normalizeTables(schema.tables);
   const isExpanded = expandedSchemas.has(schema.id);
@@ -164,6 +170,21 @@ function SchemaTreeNode({
           <Info className="w-2.5 h-2.5 text-violet-400/60 flex-shrink-0" />
         )}
         <span className="text-[9px] text-muted-foreground/50">{tables.length}</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleActive?.(schema.id); }}
+          className={`p-0.5 rounded transition-all flex-shrink-0 ${
+            isActive
+              ? "text-emerald-500 hover:bg-emerald-500/20"
+              : "text-muted-foreground/30 hover:bg-accent/50 hover:text-muted-foreground"
+          }`}
+          title={isActive ? "Active — Sage uses this schema" : "Inactive — click to activate for Sage"}
+        >
+          {isActive ? (
+            <ToggleRight className="w-3.5 h-3.5" />
+          ) : (
+            <ToggleLeft className="w-3.5 h-3.5" />
+          )}
+        </button>
         <button
           onClick={(e) => { e.stopPropagation(); onPasteToSchema?.(schema.id); }}
           disabled={isPasting}
@@ -281,9 +302,11 @@ export interface SchemaSelection {
 interface SchemaTreePanelProps {
   onSelect?: (selection: SchemaSelection | null) => void;
   selection?: SchemaSelection | null;
+  activeSchemaIds?: Set<number>;
+  onToggleActive?: (schemaId: number) => void;
 }
 
-export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
+export function SchemaTreePanel({ onSelect, selection, activeSchemaIds, onToggleActive }: SchemaTreePanelProps) {
   const { data: schemas, isLoading } = useUserSchemas();
   const deleteMutation = useDeleteUserSchema();
   const createMutation = useCreateUserSchema();
@@ -544,6 +567,8 @@ export function SchemaTreePanel({ onSelect, selection }: SchemaTreePanelProps) {
                 onSelect={onSelect}
                 onPasteToSchema={handlePasteToSchema}
                 isPasting={pastingSchemaId === schema.id}
+                isActive={activeSchemaIds?.has(schema.id) ?? false}
+                onToggleActive={onToggleActive}
               />
             ))
           )}

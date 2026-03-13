@@ -780,6 +780,7 @@ export async function registerRoutes(
         question: z.string().min(1),
         queryContent: z.string().optional(),
         dialect: z.string().optional(),
+        activeSchemaIds: z.array(z.number()).optional(),
       }).parse(req.body);
 
       if (!isLLMConfigured()) {
@@ -791,8 +792,11 @@ export async function registerRoutes(
       const { userId: askUserId } = getAuth(req);
       logActivity(askUserId, "chat.ask", "chat");
 
-      // Gather schema context (includes inline context + voice annotations)
-      const schemas = await storage.getUserSchemas();
+      // Gather schema context — filter to active schemas if specified
+      const allSchemas = await storage.getUserSchemas();
+      const schemas = input.activeSchemaIds && input.activeSchemaIds.length > 0
+        ? allSchemas.filter((s) => input.activeSchemaIds!.includes(s.id))
+        : allSchemas;
       const schemaContext = await buildSchemaContext(schemas);
 
       const result = await llmAskQuestion(

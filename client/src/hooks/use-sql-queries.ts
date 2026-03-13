@@ -401,7 +401,7 @@ export function useUpdateAgentSettings() {
 
 export function useAskQuestion() {
   const queryClient = useQueryClient();
-  return useMutation<{ answer: string; contextUpdated?: boolean }, Error, { question: string; queryContent?: string; dialect?: string }>({
+  return useMutation<{ answer: string; contextUpdated?: boolean }, Error, { question: string; queryContent?: string; dialect?: string; activeSchemaIds?: number[] }>({
     mutationFn: async (data) => {
       const res = await fetch("/api/ask", {
         method: "POST",
