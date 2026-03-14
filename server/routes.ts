@@ -270,7 +270,7 @@ export async function registerRoutes(
       : [...ALL_CATEGORIES];
 
     // Gather schema context (includes voice annotations) — skip for demo
-    const schemas = isDemoMode ? [] : await storage.getUserSchemas();
+    const schemas = isDemoMode ? [] : await storage.getUserSchemas(analysisUserId || undefined);
     const schemaContext = await buildSchemaContext(schemas);
 
     // Gather document context
@@ -493,7 +493,8 @@ export async function registerRoutes(
     });
 
     // 4. Schemas
-    const schemas = await storage.getUserSchemas();
+    const { userId: ctxUserId } = getAuth(req);
+    const schemas = await storage.getUserSchemas(ctxUserId || undefined);
     const schemaContext = await buildSchemaContext(schemas);
     if (schemaContext) {
       blocks.push({
@@ -587,7 +588,7 @@ export async function registerRoutes(
 
       if (isLLMConfigured()) {
         // Gather schemas for context (includes voice annotations)
-        const schemas = await storage.getUserSchemas();
+        const schemas = await storage.getUserSchemas(fmtUserId || undefined);
         const schemaContext = await buildSchemaContext(schemas);
 
         const result = await llmFormatQuery(input.sql, dialect, schemaContext);
@@ -631,7 +632,7 @@ export async function registerRoutes(
       // Gather schema context for richer analysis (non-fatal if it fails)
       let schemaContext: string | undefined;
       try {
-        const schemas = await storage.getUserSchemas();
+        const schemas = await storage.getUserSchemas(wfUserId || undefined);
         schemaContext = await buildSchemaContext(schemas);
       } catch (schemaErr) {
         console.warn("[waterfall] Could not load schema context:", schemaErr);
@@ -793,7 +794,7 @@ export async function registerRoutes(
       logActivity(askUserId, "chat.ask", "chat");
 
       // Gather schema context — filter to active schemas if specified
-      const allSchemas = await storage.getUserSchemas();
+      const allSchemas = await storage.getUserSchemas(askUserId || undefined);
       const schemas = input.activeSchemaIds && input.activeSchemaIds.length > 0
         ? allSchemas.filter((s) => input.activeSchemaIds!.includes(s.id))
         : allSchemas;
