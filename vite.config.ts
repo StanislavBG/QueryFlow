@@ -27,6 +27,10 @@ export default defineConfig({
     },
   },
   root: path.resolve(import.meta.dirname, "client"),
+  // Expose both Vite-native (VITE_) and Next.js-style (NEXT_PUBLIC_) public env
+  // vars to the client build. NEXT_PUBLIC_ is public by convention, so this does
+  // not leak server secrets (e.g. CLERK_SECRET_KEY has neither prefix).
+  envPrefix: ["VITE_", "NEXT_PUBLIC_"],
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
