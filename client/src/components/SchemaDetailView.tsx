@@ -4,8 +4,16 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Table2, Database, Key, Columns3, ChevronLeft, ArrowRight, Plus, Check, X, Pencil, Trash2, Upload, FileText, Loader2, Info, Mic, Square } from "lucide-react";
+import { Table2, Database, Key, Columns3, ChevronLeft, ArrowRight, Plus, Check, X, Pencil, Trash2, Upload, FileText, Loader2, Info, Mic, Square, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { VoiceContextButton } from "@/components/VoiceContextButton";
 import { normalizeTables, SchemaModule } from "@/components/SchemaModule";
@@ -35,6 +43,17 @@ function uniqueName(prefix: string, existingNames: string[]): string {
   let i = existingNames.length + 1;
   while (nameSet.has(`${prefix}${i}`.toLowerCase())) i++;
   return `${prefix}${i}`;
+}
+
+/** Trigger a browser download of a schema export. The server sets the
+ *  filename via Content-Disposition; same-origin cookies carry auth. */
+function downloadSchemaExport(schemaId: number, format: "md" | "sql") {
+  const a = document.createElement("a");
+  a.href = `/api/schemas/${schemaId}/export?format=${format}`;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 interface SchemaDetailViewProps {
@@ -297,6 +316,39 @@ function SchemaOverview({
             )}
           </div>
         </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              title="Download this schema for 1:1 recreation elsewhere"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Export "{schema.name}"
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => downloadSchemaExport(schema.id, "md")} className="gap-2">
+              <FileText className="w-3.5 h-3.5 text-primary" />
+              <div className="flex flex-col">
+                <span className="text-xs">Markdown (.md)</span>
+                <span className="text-[10px] text-muted-foreground">Readable documentation</span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => downloadSchemaExport(schema.id, "sql")} className="gap-2">
+              <Database className="w-3.5 h-3.5 text-emerald-500" />
+              <div className="flex flex-col">
+                <span className="text-xs">SQL DDL (.sql)</span>
+                <span className="text-[10px] text-muted-foreground">Importable in most SQL servers</span>
+              </div>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <VoiceContextButton
           schemaId={schema.id}
           targetType="schema"
