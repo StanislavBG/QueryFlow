@@ -47,6 +47,7 @@ Preferred communication style: Simple, everyday language.
   - `DELETE /api/feedback/:id` — Delete a feedback item
   - `GET/PATCH /api/agent-settings` — Analysis agent configuration
   - `GET/POST/PATCH/DELETE /api/schemas` — User schema management
+  - `GET /api/schemas/:id/export?format=md|sql` — Download a single schema (Markdown docs or SQL DDL) for 1:1 recreation elsewhere
   - `GET/POST/DELETE /api/schemas/:schemaId/voice-context` — Schema voice/text annotations
   - `POST /api/schemas/:schemaId/voice-context/transcribe` — Audio transcription
   - `GET/POST/DELETE /api/chat` — AI chat messages

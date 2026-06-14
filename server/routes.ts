@@ -8,6 +8,7 @@ import { formatSQL } from "./formatter";
 import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, DEMO_SCENARIO_COUNT, getDemoScenarioName, llmGenerateQueryFromVoice, llmAnalyzeWaterfall, logLlmError, getLlmErrors, clearLlmErrors } from "./llm";
 import { requireAdmin, resolveAppUser, logActivity } from "./auth";
 import { mergeWaterfallAnalysis } from "./waterfall-merge";
+import { buildSchemaExport } from "./schema-export";
 import type { WaterfallAnalysis } from "@shared/waterfall";
 import Stripe from "stripe";
 import { createCheckoutSessionSchema } from "@shared/schema";
@@ -1085,6 +1086,31 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
     const schema = await storage.getUserSchema(id);
     if (!schema) return res.status(404).json({ message: "Schema not found" });
     res.json(schema);
+  });
+
+  // Download a full, self-contained export of a single schema so it can be
+  // recreated 1:1 in another environment. Two formats are offered:
+  //   ?format=md  → human-readable Markdown documentation
+  //   ?format=sql → runnable CREATE TABLE DDL (importable in most SQL servers)
+  // Both embed schema/table/column descriptions and voice annotations.
+  app.get("/api/schemas/:id/export", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid schema ID" });
+
+    const format = (String(req.query.format || "md").toLowerCase() === "sql" ? "sql" : "md") as "md" | "sql";
+
+    const schema = await storage.getUserSchema(id);
+    if (!schema) return res.status(404).json({ message: "Schema not found" });
+
+    const voiceContexts = await storage.getSchemaVoiceContexts(id);
+    const { content, filename, contentType } = buildSchemaExport(schema, voiceContexts, format);
+
+    const { userId } = getAuth(req);
+    logActivity(userId, "schema.export", "schema", id, { format });
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(content);
   });
 
   app.post("/api/schemas", async (req, res) => {
