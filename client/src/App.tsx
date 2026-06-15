@@ -11,12 +11,11 @@ import AdminDashboard from "@/pages/AdminDashboard";
 import NotFound from "@/pages/not-found";
 import { useCurrentUser } from "@/hooks/use-admin";
 
-// Read the Clerk publishable key from the Vite-native env var, falling back to
-// the Next.js-style name (NEXT_PUBLIC_*) so the build works regardless of which
-// secret name is configured. Requires both prefixes in vite.config envPrefix.
-const clerkPubKey =
-  import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ||
-  import.meta.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+// Clerk publishable key, injected at build time by vite.config.ts via `define`.
+// It validates and picks a real pk_test_/pk_live_ key from process.env, so a
+// stale/invalid value under any env-var name cannot shadow the correct one.
+declare const __CLERK_PUBLISHABLE_KEY__: string;
+const clerkPubKey = __CLERK_PUBLISHABLE_KEY__;
 
 /**
  * Watch the `dark` class on <html> so ClerkProvider can switch themes.
