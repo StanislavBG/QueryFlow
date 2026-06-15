@@ -183,6 +183,7 @@ Produce a SINGLE, SELF-CONTAINED HTML document optimized for HUMAN EXPLORATION. 
 - Cover the SAME information as the source (every table, every column with its type and key status, all descriptions/notes, and all relationships) — do not omit any table or column.
 - Add MORE explanatory text than the raw source: a clear narrative overview of what the schema represents, how the tables fit together, how to navigate it, and what each table is for. Where relationships exist, explain them in prose.
 - Be optimized for reading and exploration: an introduction, a table of contents with in-page anchor links, per-table sections, readable column tables, and a relationships summary.
+- Immediately AFTER the introductory overview section (and before the table of contents / per-table sections), output the exact placeholder comment on its own line: <!--QF_ERD_DIAGRAMS--> . A visual ERD (full-page diagram plus a slide version) will be inserted there automatically. Do NOT attempt to draw your own diagram, SVG, or ASCII art — just emit the placeholder.
 
 STRICT ACCURACY RULES (this is reviewed by expert analysts who will not tolerate fabrication):
 - Do NOT invent tables, columns, data types, primary keys, or relationships. Use ONLY what appears in the source.

@@ -8,7 +8,7 @@ import { formatSQL } from "./formatter";
 import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, DEMO_SCENARIO_COUNT, getDemoScenarioName, llmGenerateQueryFromVoice, llmAnalyzeWaterfall, llmGenerateSchemaOverviewHtml, logLlmError, getLlmErrors, clearLlmErrors } from "./llm";
 import { requireAdmin, resolveAppUser, logActivity } from "./auth";
 import { mergeWaterfallAnalysis } from "./waterfall-merge";
-import { buildSchemaExport, buildSchemaMarkdown, exportFileBase } from "./schema-export";
+import { buildSchemaExport, buildSchemaMarkdown, buildSchemaErdHtml, exportFileBase } from "./schema-export";
 import type { WaterfallAnalysis } from "@shared/waterfall";
 import Stripe from "stripe";
 import { createCheckoutSessionSchema } from "@shared/schema";
@@ -1114,7 +1114,18 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
       }
       try {
         const markdown = buildSchemaMarkdown(schema, voiceContexts, new Date());
-        const html = await llmGenerateSchemaOverviewHtml(schema.name, markdown);
+        const llmHtml = await llmGenerateSchemaOverviewHtml(schema.name, markdown);
+        // Inject the deterministic ERD (full-page + slide) at the placeholder,
+        // falling back to right after <body> if the model omitted it.
+        const erdHtml = buildSchemaErdHtml(schema);
+        let html: string;
+        if (llmHtml.includes("<!--QF_ERD_DIAGRAMS-->")) {
+          html = llmHtml.replace("<!--QF_ERD_DIAGRAMS-->", erdHtml);
+        } else if (/<body[^>]*>/i.test(llmHtml)) {
+          html = llmHtml.replace(/<body[^>]*>/i, (m) => `${m}\n${erdHtml}`);
+        } else {
+          html = erdHtml + llmHtml;
+        }
         logActivity(userId, "schema.export", "schema", id, { format });
         res.setHeader("Content-Type", "text/html; charset=utf-8");
         res.setHeader("Content-Disposition", `attachment; filename="${exportFileBase(schema.name)}.html"`);
