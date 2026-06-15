@@ -156,6 +156,58 @@ ${sql}
   return { formatted: text.trim() || sql, notes: "" };
 }
 
+/**
+ * Curate a single, self-contained HTML overview of a schema, optimized for
+ * humans to explore. Receives the schema's structured documentation (as
+ * Markdown, the source of truth) and returns a complete HTML document with
+ * richer explanatory prose than the raw exports — without inventing any
+ * structural facts (tables, columns, types, keys, relationships).
+ */
+export async function llmGenerateSchemaOverviewHtml(
+  schemaName: string,
+  schemaMarkdown: string,
+): Promise<string> {
+  const openai = getClient();
+
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    max_tokens: 16384,
+    messages: [
+      {
+        role: "user",
+        content: `You are a senior data architect writing a schema overview document for fellow analysts to explore and understand a database schema.
+
+Below is the authoritative, structured documentation for the schema "${schemaName}" (in Markdown). It is the single source of truth.
+
+Produce a SINGLE, SELF-CONTAINED HTML document optimized for HUMAN EXPLORATION. Goals:
+- Cover the SAME information as the source (every table, every column with its type and key status, all descriptions/notes, and all relationships) — do not omit any table or column.
+- Add MORE explanatory text than the raw source: a clear narrative overview of what the schema represents, how the tables fit together, how to navigate it, and what each table is for. Where relationships exist, explain them in prose.
+- Be optimized for reading and exploration: an introduction, a table of contents with in-page anchor links, per-table sections, readable column tables, and a relationships summary.
+
+STRICT ACCURACY RULES (this is reviewed by expert analysts who will not tolerate fabrication):
+- Do NOT invent tables, columns, data types, primary keys, or relationships. Use ONLY what appears in the source.
+- You MAY add interpretive prose, but ground it in the provided descriptions/notes. Do not assert facts that aren't supported by the source. When inferring purpose from a name, phrase it as a likely interpretation, not a certainty.
+- Preserve exact identifier names, types, and key designations character-for-character.
+
+OUTPUT REQUIREMENTS:
+- Return ONLY a complete HTML document starting with <!DOCTYPE html>. No markdown fences, no commentary before or after.
+- Fully self-contained: all CSS inline in a <style> tag, no external resources, no JavaScript required, no external fonts/CDNs.
+- Clean, professional, readable styling (good typography, spacing, a clear table of contents, subtle table styling). Use system fonts.
+- Include the schema name in the <title> and a header.
+
+SOURCE DOCUMENTATION (Markdown):
+${schemaMarkdown}`,
+      },
+    ],
+  });
+
+  let html = extractText(response).trim();
+  // Strip accidental markdown fences if the model added them.
+  const fenced = html.match(/```(?:html)?\s*([\s\S]*?)```/i);
+  if (fenced) html = fenced[1].trim();
+  return html;
+}
+
 /** Recommendation shape — core fields plus arbitrary extra metadata from the LLM. */
 export type AnalysisRecommendation = Record<string, unknown> & {
   agentType: string;

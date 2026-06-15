@@ -5,10 +5,10 @@ import { storage } from "./storage";
 import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
 import { formatSQL } from "./formatter";
-import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, DEMO_SCENARIO_COUNT, getDemoScenarioName, llmGenerateQueryFromVoice, llmAnalyzeWaterfall, logLlmError, getLlmErrors, clearLlmErrors } from "./llm";
+import { isLLMConfigured, llmFormatQuery, llmAnalyzeQuery, llmValidateRecommendations, llmAskQuestion, llmParseSchema, llmGenerateDemo, DEMO_SCENARIO_COUNT, getDemoScenarioName, llmGenerateQueryFromVoice, llmAnalyzeWaterfall, llmGenerateSchemaOverviewHtml, logLlmError, getLlmErrors, clearLlmErrors } from "./llm";
 import { requireAdmin, resolveAppUser, logActivity } from "./auth";
 import { mergeWaterfallAnalysis } from "./waterfall-merge";
-import { buildSchemaExport } from "./schema-export";
+import { buildSchemaExport, buildSchemaMarkdown, exportFileBase } from "./schema-export";
 import type { WaterfallAnalysis } from "@shared/waterfall";
 import Stripe from "stripe";
 import { createCheckoutSessionSchema } from "@shared/schema";
@@ -1089,23 +1089,43 @@ JDM_BOM\tdecimal(15,7)\tYES\t\t\t`;
   });
 
   // Download a full, self-contained export of a single schema so it can be
-  // recreated 1:1 in another environment. Two formats are offered:
-  //   ?format=md  → human-readable Markdown documentation
-  //   ?format=sql → runnable CREATE TABLE DDL (importable in most SQL servers)
-  // Both embed schema/table/column descriptions and voice annotations.
+  // recreated 1:1 in another environment, or explored by humans:
+  //   ?format=md   → human-readable Markdown documentation
+  //   ?format=sql  → runnable CREATE TABLE DDL (importable in most SQL servers)
+  //   ?format=html → LLM-curated, self-contained HTML overview for exploration
+  // All embed schema/table/column descriptions and voice annotations.
   app.get("/api/schemas/:id/export", async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ message: "Invalid schema ID" });
 
-    const format = (String(req.query.format || "md").toLowerCase() === "sql" ? "sql" : "md") as "md" | "sql";
+    const raw = String(req.query.format || "md").toLowerCase();
+    const format = (raw === "sql" ? "sql" : raw === "html" ? "html" : "md") as "md" | "sql" | "html";
 
     const schema = await storage.getUserSchema(id);
     if (!schema) return res.status(404).json({ message: "Schema not found" });
 
     const voiceContexts = await storage.getSchemaVoiceContexts(id);
-    const { content, filename, contentType } = buildSchemaExport(schema, voiceContexts, format);
-
     const { userId } = getAuth(req);
+
+    // HTML is an LLM-curated overview (per CLAUDE.md, smart features are LLM-based).
+    if (format === "html") {
+      if (!isLLMConfigured()) {
+        return res.status(503).json({ message: "LLM not configured — HTML overview is unavailable." });
+      }
+      try {
+        const markdown = buildSchemaMarkdown(schema, voiceContexts, new Date());
+        const html = await llmGenerateSchemaOverviewHtml(schema.name, markdown);
+        logActivity(userId, "schema.export", "schema", id, { format });
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="${exportFileBase(schema.name)}.html"`);
+        return res.send(html);
+      } catch (err) {
+        console.error("[schema-export] HTML generation failed:", err);
+        return res.status(502).json({ message: "Failed to generate HTML overview." });
+      }
+    }
+
+    const { content, filename, contentType } = buildSchemaExport(schema, voiceContexts, format);
     logActivity(userId, "schema.export", "schema", id, { format });
 
     res.setHeader("Content-Type", contentType);

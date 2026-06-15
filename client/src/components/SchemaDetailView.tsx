@@ -4,7 +4,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Table2, Database, Key, Columns3, ChevronLeft, ArrowRight, Plus, Check, X, Pencil, Trash2, Upload, FileText, Loader2, Info, Mic, Square, Download } from "lucide-react";
+import { Table2, Database, Key, Columns3, ChevronLeft, ArrowRight, Plus, Check, X, Pencil, Trash2, Upload, FileText, Loader2, Info, Mic, Square, Download, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -170,9 +170,38 @@ function SchemaOverview({
 }) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState(schema.name);
+  const [htmlPending, setHtmlPending] = useState(false);
   const updateMutation = useUpdateUserSchema();
   const addTablesMutation = useAddTablesToSchema();
   const { toast } = useToast();
+
+  // HTML overview is LLM-generated, so it can take several seconds — fetch it
+  // with a loading state and save the response as a download, rather than the
+  // instant anchor download used for the Markdown/SQL exports.
+  const handleDownloadHtmlOverview = useCallback(async () => {
+    setHtmlPending(true);
+    toast({ title: "Generating HTML overview…", description: "The AI is curating a human-friendly overview. This may take a moment." });
+    try {
+      const res = await fetch(`/api/schemas/${schema.id}/export?format=html`);
+      if (!res.ok) {
+        throw new Error(res.status === 503 ? "AI is not configured for this workspace." : "Failed to generate overview.");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${schema.name}.html`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: "HTML overview ready" });
+    } catch (err) {
+      toast({ title: "Couldn't generate HTML overview", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+    } finally {
+      setHtmlPending(false);
+    }
+  }, [schema.id, schema.name, toast]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pasteContent, setPasteContent] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
@@ -345,6 +374,22 @@ function SchemaOverview({
               <div className="flex flex-col">
                 <span className="text-xs">SQL DDL (.sql)</span>
                 <span className="text-[10px] text-muted-foreground">Importable in most SQL servers</span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={(e) => { e.preventDefault(); if (!htmlPending) handleDownloadHtmlOverview(); }}
+              disabled={htmlPending}
+              className="gap-2"
+            >
+              {htmlPending ? (
+                <Loader2 className="w-3.5 h-3.5 text-violet-400 animate-spin" />
+              ) : (
+                <Globe className="w-3.5 h-3.5 text-violet-400" />
+              )}
+              <div className="flex flex-col">
+                <span className="text-xs">HTML overview (.html)</span>
+                <span className="text-[10px] text-muted-foreground">AI-curated, for human exploration</span>
               </div>
             </DropdownMenuItem>
           </DropdownMenuContent>
